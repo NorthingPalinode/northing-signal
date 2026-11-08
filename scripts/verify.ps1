@@ -7,6 +7,7 @@ try {
     $env:PYTHONUTF8 = '1'
     & $taskPython -m ruff check backend tests_reader
     if ($LASTEXITCODE -ne 0) { throw 'Static checks failed' }
+    New-Item -ItemType Directory -Path (Join-Path $taskRoot '.tmp') -Force | Out-Null
     & $taskPython -m pytest -q --basetemp .tmp/reader-check
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     if ($Legacy) {

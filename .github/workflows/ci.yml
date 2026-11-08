@@ -20,7 +20,9 @@ jobs:
       - run: python -m pip install --no-deps -e .
       - run: python -m ruff check backend tests_reader
       - name: Product regressions and shared public-network boundary
-        run: python -m pytest -q --basetemp .tmp/ci-tests --junitxml .tmp/ci-tests.xml
+        run: |
+          mkdir -p .tmp
+          python -m pytest -q --basetemp .tmp/ci-tests --junitxml .tmp/ci-tests.xml
       - run: npm ci --no-audit --no-fund && npm test && npm run build
         working-directory: frontend
       - uses: actions/upload-artifact@v4

@@ -97,7 +97,9 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 其他环境或分步运行：
 
 ```bash
+. .venv/bin/activate
 python -m ruff check backend tests_reader
+mkdir -p .tmp
 python -m pytest -q --basetemp .tmp/reader-check
 cd frontend
 npm test
