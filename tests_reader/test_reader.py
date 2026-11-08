@@ -15,6 +15,13 @@ from cfaw_news.briefing.understand import Analyzer, grounded, validate, validate
 from cfaw_news.config import Settings
 
 
+def settings(**changes):
+    """Complete synthetic provider settings; tests never depend on the owner's .env."""
+    values = dict(llm_mode="baseline", llm_base_url="https://example.org/v1",
+                  llm_model="synthetic", llm_api_key="synthetic-key")
+    return Settings(_env_file=None, **{**values, **changes})
+
+
 def material(**changes):
     value = dict(id="release", source_id="official", source_name="Fixture official", source_role="official",
                  title="Atlas 2 released", url="https://example.org/atlas", text="Atlas 2 is available. Free for research.",
@@ -179,7 +186,7 @@ def test_rss_and_release_parse_strip_scripts_and_keep_original_date():
 
 
 def test_budget_stops_before_external_request(tmp_path):
-    analyzer = Analyzer(Store(tmp_path / "reader.db"), Settings(llm_mode="compatible", llm_api_key="fake", llm_base_url="https://example.org", llm_model="fixture"), requests_per_day=0)
+    analyzer = Analyzer(Store(tmp_path / "reader.db"), settings(llm_mode="compatible", llm_api_key="fake", llm_base_url="https://example.org", llm_model="fixture"), requests_per_day=0)
     with pytest.raises(ValueError, match="daily_model_budget_reached"):
         asyncio.run(analyzer.batch([material()]))
 
@@ -232,7 +239,7 @@ def test_shared_budget_reservation_and_immutable_snapshot(tmp_path):
 def test_api_boundary_preferences_and_missing_revision(tmp_path):
     from fastapi.testclient import TestClient
     store = Store(tmp_path / "reader.db")
-    with TestClient(create_app(Settings(), store)) as client:
+    with TestClient(create_app(settings(), store)) as client:
         assert client.get("/api/health").json()["engine"] == "content-v1"
         assert client.get("/api/reader").json()["counts"]["materials"] == 0
         assert client.put("/api/reader/preferences", json=Preferences().model_dump(),
@@ -248,7 +255,7 @@ def test_cancel_stops_before_judgment_publication(tmp_path, monkeypatch):
     async def scenario():
         store = Store(tmp_path / "reader.db")
         store.capture(material())
-        service = ContentService(store, Settings(llm_mode="compatible", llm_api_key="fake",
+        service = ContentService(store, settings(llm_mode="compatible", llm_api_key="fake",
                                                  llm_base_url="https://example.org", llm_model="fixture"))
         entered = asyncio.Event()
         async def collect_nothing(*args, **kwargs):
@@ -276,7 +283,7 @@ def test_follow_persistence_aliases_and_version_scoped_unread(tmp_path):
     store.capture(item)
     store.judge(item.version, POLICY_HASH, assessment().model_dump(), "fixture")
     follow = store.save_follow(FollowInput(name="中文话题", query="unmatched, Atlas 2", active=False))
-    service = ContentService(Store(store.path), Settings())
+    service = ContentService(Store(store.path), settings())
     view = service.view()
     topic = view["follows"][0]
     assert topic["id"] == follow["id"] and len(topic["unread_ids"]) == 1
@@ -300,7 +307,7 @@ def test_follow_scheduler_respects_interval_pause_and_shared_worker(tmp_path, mo
         store = Store(tmp_path / "scheduler.db")
         draft = store.create_follow_draft("追踪可复现的本地智能体实现和评估。", intent_plan())
         follow, _ = store.confirm_follow(ConfirmFollow(draft_id=draft["id"], plan=intent_plan()))
-        service = ContentService(store, Settings())
+        service = ContentService(store, settings())
         calls = []
         entered = asyncio.Event()
         release = asyncio.Event()
@@ -326,7 +333,7 @@ def test_follow_scheduler_respects_interval_pause_and_shared_worker(tmp_path, mo
         service.track_due()
         assert len(calls) == 2
         store.update_follow(follow["id"], active=True, last_checked=None)
-        restarted = ContentService(Store(store.path), Settings())
+        restarted = ContentService(Store(store.path), settings())
         restarted.track_due()
         await restarted.task
         assert len(calls) == 4
@@ -340,7 +347,7 @@ def test_saved_version_survives_unprocessed_revision_and_api_unfollow(tmp_path):
     item = material()
     store.capture(item)
     store.judge(item.version, POLICY_HASH, assessment().model_dump(), "fixture")
-    with TestClient(create_app(Settings(), store)) as client:
+    with TestClient(create_app(settings(), store)) as client:
         event = client.get("/api/reader").json()["events"][0]
         action = dict(request_id="saved-original-001", event_id=event["id"], version=item.version, kind="saved")
         assert client.post("/api/reader/interactions", json=action).status_code == 200
@@ -368,7 +375,7 @@ def test_cancelling_follow_does_not_publish_late_model_output(tmp_path, monkeypa
         store = Store(tmp_path / "cancel-follow.db")
         draft = store.create_follow_draft("追踪本地智能体的实现、代码和具体评估。", intent_plan())
         follow, _ = store.confirm_follow(ConfirmFollow(draft_id=draft["id"], plan=intent_plan()))
-        service = ContentService(store, Settings(llm_mode="compatible", llm_api_key="fake"))
+        service = ContentService(store, settings(llm_mode="compatible", llm_api_key="fake"))
         entered = asyncio.Event()
         async def found(*args, **kwargs):
             store.capture(material())
@@ -409,7 +416,7 @@ def test_intent_preview_never_starts_tracking_and_confirmation_is_bound(tmp_path
     from cfaw_news.briefing.models import ConfirmFollow
     from fastapi.testclient import TestClient
     store = Store(tmp_path / "intent-api.db")
-    app = create_app(Settings(), store)
+    app = create_app(settings(), store)
     calls = []
     async def synthetic_plan(prompt, payload, validator, **kwargs):
         calls.append(kwargs["purpose"])
@@ -458,7 +465,7 @@ def test_confirmed_intent_rotates_searches_and_semantics_controls_membership(tmp
         for i, item in enumerate([positive, negative]):
             store.capture(item)
             store.judge(item.version, POLICY_HASH, assessment(event_key=f"event-{i}", object=f"Object-{i}").model_dump(), "synthetic")
-        service = ContentService(store, Settings())
+        service = ContentService(store, settings())
         searches, semantic_calls = [], []
         async def retrieve(*args, **kwargs):
             searches.append((args[1], kwargs["channels"]))
@@ -499,7 +506,7 @@ def test_cancel_intent_matching_and_shared_model_budget(tmp_path, monkeypatch):
         item = material()
         store.capture(item)
         store.judge(item.version, POLICY_HASH, assessment().model_dump(), "synthetic")
-        service = ContentService(store, Settings())
+        service = ContentService(store, settings())
         entered = asyncio.Event()
         async def empty(*args, **kwargs):
             return []
@@ -515,7 +522,7 @@ def test_cancel_intent_matching_and_shared_model_budget(tmp_path, monkeypatch):
         await entered.wait()
         await service.cancel()
         assert not store.intent_assessments(follow["plan_hash"])
-        blocked = Analyzer(store, Settings(llm_mode="compatible",llm_api_key="fake"), requests_per_day=0)
+        blocked = Analyzer(store, settings(llm_mode="compatible",llm_api_key="fake"), requests_per_day=0)
         with pytest.raises(ValueError, match="daily_model_budget_reached"):
             await blocked.request_json("prompt", {}, lambda value:value, purpose="intent_plan")
     asyncio.run(scenario())
@@ -530,7 +537,7 @@ def test_intent_upstream_failure_is_not_reported_as_bad_description(tmp_path, mo
     monkeypatch.setattr("cfaw_news.briefing.understand.httpx.AsyncClient",
                         lambda **kwargs: client_type(transport=httpx.MockTransport(reply), **kwargs))
     store = Store(tmp_path / "upstream-failure.db")
-    app = create_app(Settings(llm_mode="compatible", llm_api_key="synthetic-key",
+    app = create_app(settings(llm_mode="compatible", llm_api_key="synthetic-key",
                               llm_base_url="https://example.org/v1"), store)
     with TestClient(app) as client:
         response = client.post("/api/reader/follows/interpret", json={"description": "我想跟进人工智能开发工具的官方发布和工程实践。"})
