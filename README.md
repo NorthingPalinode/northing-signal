@@ -1,98 +1,120 @@
 # CFAW News
 
-DEV-01～05 现按 [AI 开发与验收规则](docs/plans/G1_AI_DEVELOPMENT_RULES.md) 执行。五轨迹已重建为明确标记的单 AI 初稿与证据复核批次，真人双标为可选研究路径。当前验收、复现结果与限制见 [AI 批次收尾记录](evals/intelligence_v1/reports/PR5_AI_DEVELOPMENT.md)；旧真人材料退出当前入口，历史冻结报告保留原语境。
+面向 AI 读者的本机个人情报空间：从公开材料中整理值得知道的变化，减少重复报道、无关消息和只有标题的噪声，并保留原始出处与判断边界。
 
-CFAW News 面向 AI 开发者，从新闻、官方材料、论文与开源项目发现值得知道的进展，形成重点情报、前沿速览和可检索资料库，在用户主动回访时补齐重要变化。
+[![starter-checks](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml)
 
-研发优先级：算法与评测质量 > 关键用户体验 > 扩展功能数量。用户自主阅读、研究和行动，不默认发送应用外提醒。
+当前采用独立的 Python / React 内容引擎。默认入口已从旧目标工作台切换到阅读器；旧个人数据库与历史研究材料保留，未自动迁移或删除。
 
-## 项目依据与当前阶段
+## 可以做什么
 
-| 文档 | 职责 |
-| --- | --- |
-| [CFAW News V1](docs/CFAW_News_V1.md) | 唯一产品与研究方向，定义范围和 G0–G5 门槛 |
-| [G1 详细实施计划](docs/plans/G1_IMPLEMENTATION_PLAN.md) | 当前 G1 执行依据，规定 PR1–PR5、数据契约、时间可见性、B0–B4 和验收 |
-| [G0 源码审计](audit/G0_REUSE_AUDIT.md) | 已核验的存量能力、复用结论、缺口和风险 |
-| [G0 机器记录](audit/G0_BASELINE.json) | G0 当次环境、依赖、验证、数据库恢复及文件指纹；不是每轮自动更新的结果 |
-| [AGENTS.md](AGENTS.md) | 后续 AI 和开发者必须遵守的工程规则 |
+| 页面 | 用途 |
+|---|---|
+| 我的简报 | 汇总重要事件、具体变化、阅读价值与原文依据，支持阅读偏好、反馈与历史简报 |
+| 发现 | 按 AI 方向浏览，搜索已有资料，或选择公开来源主动检索新材料 |
+| 关注 | 用自然语言描述需求，核对 AI 理解与检索方案，确认后持续追踪；集中查看收藏 |
+| 资料库 | 检索原始材料，区分已整理内容与尚待获取正文的线索 |
 
-**G0、G1-PR1 至 G1-PR4 技术交付与 PR4 独立复审已完成；PR5 的五条轨迹现已重建为 AI 开发批次。** G1-a 开发验收采用 ai_development，不再等待第二名真人；实际验证和新版本证据见 [AI 批次收尾记录](evals/intelligence_v1/reports/PR5_AI_DEVELOPMENT.md)和 [G1 总验收](evals/intelligence_v1/G1_ACCEPTANCE.md)。[旧人工收尾](evals/intelligence_v1/reports/PR5_HUMAN_READINESS.md)、[v4 修复](evals/intelligence_v1/reports/PR5_REVIEW_FIX.md)与[原 PR5 验收](evals/intelligence_v1/reports/PR5_ACCEPTANCE.md)仅保留历史语境；前序进入证据见 [PR4 独立复审](evals/intelligence_v1/reports/PR4_REREVIEW_GATE.md)。当前不自动开展 G2、训练、复杂 UI 重做、持续自动 Agent 或生产数据库迁移。
+话题追踪遵循 **描述需求 → AI 理解意图 → 纠正或编辑方案 → 用户确认 → 定期检索与相关性判断**。确认前不启动搜索；修改范围也需要重新确认。频率可选约每 30 分钟、2 小时、每天或每周，仅在本地服务运行期间执行，可暂停、恢复或取消。
 
-G1-PR1 已提供严格 Schema、Manifest、时间/版本门禁、来源许可与家族拆分校验、合成样例和回归测试。PR2 已提供 DEV-01 六时点、七份合成文档版本、Claim/事件关系、标注手册、数据卡和带外部 Manifest pin 的最小 dry-run 导出；[修复与验收记录](evals/intelligence_v1/reports/PR2_REVIEW_FIXES.md)明确区分技术通过与人工待完成。PR3 提供共享全候选的 B0/B1/B2-predicted 与单列 B2-oracle；PR4 增加时间/曝光规则、统一预算、独立合成回访故事、反事实和报告 CLI，入口与限制见[离线说明](evals/intelligence_v1/README.md)。真人金标及正式语义变化分类未测；AI 开发验收与可选真人研究验收分开报告。情报页也属于后续设计。旧目标研究路线、24 周排期、重复交接、过渡归档和旧界面验收文档已删除，不再作为执行依据。
+卡片正文与空白区域均可打开详情；收藏和反馈按钮独立响应。打开不等于“已了解”，收藏保留当时版本。系统区分来源陈述、文中报告的测试与作者观点，搜索摘要不冒充原文，模型解释不冒充独立验证。
 
-## 当前代码的可用能力
+## 信息来源
 
-现有工程是独立 Python/React 本地单用户起步版，不依赖旧比赛平台。技术栈为 FastAPI、Pydantic、SQLAlchemy、SQLite、HTTPX、asyncio/SSE、React、TypeScript 和 Vite。
+固定订阅池目前包含 12 个官方、研究、媒体、技术作者和开源发布来源，配置见 [briefing_sources.json](data/briefing_sources.json)。另有九类可选检索入口：
 
-- 新闻来源获取、状态记录、缓存、检索筛选、分页和文章阅读；来源失败保留已有资料。来源配置在 `data/live_sources.json`，配置不保证源站当前可用。
-- 中文二元词/英文词 BM25 召回及可选兼容模型。默认 `baseline` 不调用模型；无候选跳过模型。
-- 旧 Goal、不可变运行快照、引用定位、用户决定和明确批准后的应用内日程。版本、取消、失效防发布和幂等规则继续保留。
-- 独立的阅读正文与图片缓存。当前阅读内容不会改写历史运行证据，来源标识不冒充文章配图。
+| 检索入口 | 覆盖与边界 |
+|---|---|
+| 网页搜索 | 通过 AnySearch 发现官方发布、文档、技术文章与评测；摘要先作线索，补读原文后再整理 |
+| arXiv | 研究预印本与摘要，不代表同行评审或结论已验证 |
+| GitHub | 开源项目与有限 README 节选，热度不作为质量证明 |
+| Hugging Face | 模型仓库与模型卡，仓库更新时间不当作模型发布日期 |
+| OpenAlex | 跨期刊、会议的研究索引与收录摘要，明确区分索引摘要和论文全文 |
+| Hacker News | 开发者分享与讨论线索，社区提交时间不当作外链原文发布时间 |
+| X / Twitter | 默认检索公开网页中的帖子线索；可选接入自有授权的官方近期帖子 API |
+| 抖音 | 公开网页索引中的视频、图文线索，尚未接入站内原生搜索或视频字幕 |
+| 小红书 | 公开网页索引中的笔记线索，尚未接入站内笔记搜索或登录正文 |
 
-当前在线应用尚未接入 V1 文档版本库、事件/主张、情报分层、曝光历史、回访排序或时间回放。离线 PR1–PR5 的契约、合成数据和基线不等于这些业务能力已上线，也不构成独立研究数据集。现有文章库不能还原全部历史；引用 ID 存在不等于语义支持。
+三家社交平台当前默认采用无需账号或原生 API 授权的公开检索。只有链接或摘要的条目标为“搜索线索 · 正文待获取”，不会生成仿佛已看过全文或视频的事实卡片。视频、音频、图片内容理解尚未实现；公开索引不保证全量、实时覆盖。来源状态会分别显示成功、无结果和失败，单个来源故障不阻断其他来源。
 
-Goal/决定/日程保留兼容，不再是新产品主线。G1 离线评测器不读取实际业务数据库、不加载 `.env`、不运行联网采集或实时模型；当前 AI 助手可离线制作开发标签与复核材料。
+## 启动
 
-## 本地运行现有应用
+需要 Python 3.11+、Node.js 24（CI 使用版本；也支持 Node.js 22.12+）以及 Git。
 
-以下用于体验兼容应用，不是 G1 离线回放入口。需要 Python 3.11+、Node.js 22.12+ 或 24；精确依赖以锁文件为准。
+### Windows / PowerShell
 
 ```powershell
-cd D:\agent_project\cfaw-news
+git clone https://github.com/V-Giotto/cfaw-news.git
+cd cfaw-news
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 powershell -ExecutionPolicy Bypass -File scripts/start.ps1
-
-# 首次安装和构建完成后
-powershell -ExecutionPolicy Bypass -File scripts/start.ps1 -SkipInstall
 ```
 
-默认打开 `http://127.0.0.1:8000`，API 文档在 `/docs`。Ctrl+C 停止；端口占用时加 `-Port 8010`。启动脚本使用本项目 `.venv`，可用 `-Python <解释器路径>` 指定创建环境的解释器。
+启动脚本创建本项目虚拟环境、安装锁定依赖、构建前端并启动本机服务。已有依赖与前端构建时，可使用 `scripts/start.ps1 -SkipInstall`；需要指定 Python 或端口时使用 `-Python`、`-Port`。
 
-默认数据库为 `.local/cfaw-news.db`，使用单个 Uvicorn worker。服务运行期间可按来源周期自动获取新闻；停机不采集。`NEWS_AUTO_REFRESH=false` 关闭自动获取，`NEWS_MEDIA_FETCH=false` 与 `NEWS_READING_FETCH=false` 控制配图及网页正文补抓。G1 离线执行不需要启动此应用。
+### macOS / Linux
 
-需要热更新时：
-
-```powershell
-# 项目根目录
-.\.venv\Scripts\python.exe -m uvicorn cfaw_news.main:create_app --factory --reload --reload-dir backend --host 127.0.0.1 --port 8000
-
-# 另一个终端
-cd D:\agent_project\cfaw-news\frontend
-npm run dev
+```bash
+git clone https://github.com/V-Giotto/cfaw-news.git
+cd cfaw-news
+[ -e .env ] || cp .env.example .env
+bash scripts/start.sh
 ```
 
-模型配置仅参考 `.env.example`、`.env.deepseek.example`，不要覆盖已有 `.env` 或复制其他项目的凭据。兼容接口的历史真实调用记录见 [LIVE_MODEL_CHECK.md](docs/LIVE_MODEL_CHECK.md)；该记录不是 G1/V1 质量评测，也不证明服务当前可用。真实模型验收不属于 G1 默认执行流程。
+打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)，点击“更新情报”。每次更新按有限批量执行并可取消；未完成的材料保留待处理状态。用户主动访问，没有站外通知或自动替用户操作第三方系统。
 
-## 开发验证
+## 模型与可选接口配置
+
+在本项目 `.env` 中填写自己的兼容 Chat Completions 接口；已有 `.env` 不要用模板覆盖。
+
+```dotenv
+LLM_MODE=compatible
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_API_KEY=your-api-key
+LLM_MODEL=your-model
+```
+
+默认 `LLM_MODE=baseline` 不调用联网模型。阅读器仍能保存原始材料，但会明确显示尚未整理；AI 意图理解和相关性判断需要配置模型，不用关键词规则冒充模型理解。
+
+**每日模型调用次数与 Token 总量默认均不设上限**，继续记录实际用量。单次工作批量、请求超时和来源接口的限速仍保留；供应商计费与限流由供应商决定。没有可靠定价资料时只显示次数与 Token，不估造费用。
+
+| 可选配置 | 用途 |
+|---|---|
+| `READER_WEB_API_KEY` | 本项目自己的 AnySearch 密钥；留空时匿名访问，受提供方限额约束 |
+| `READER_OPENALEX_API_KEY` | 本项目自己的 OpenAlex 密钥；留空时使用匿名基础接口 |
+| `READER_X_BEARER_TOKEN` | 自有授权的 X 应用 Bearer Token；不配置时仅检索公开网页线索 |
+
+不读取其他项目的密钥、浏览器 Cookie 或私人账户内容。模型理解需求时会接收所提交的描述；内容整理和相关性判断会向配置的模型发送相应材料节选与确认意图。来源检索只发送所选方向的检索词。
+
+## 验证与开发
+
+Windows 日常检查：
 
 ```powershell
-cd D:\agent_project\cfaw-news
-.\.venv\Scripts\python.exe -m ruff check backend tests evals
-.\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe evals/run_baseline.py
+powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
+```
+
+其他环境或分步运行：
+
+```bash
+python -m ruff check backend tests_reader
+python -m pytest -q --basetemp .tmp/reader-check
 cd frontend
+npm test
 npm run build
 ```
 
-也可运行 `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1`。前端修改源码后构建，`frontend/dist` 是生成物。
+默认 pytest 覆盖当前内容引擎和共用公网读取边界。CI 使用同一范围，并运行既有前端纯函数检查与构建；合成测试不是实网模型或真人阅读效果证明。历史研究测试保留显式入口 `pytest tests` 或 `scripts/verify.ps1 -Legacy`，不作为新阅读器的默认运行门槛，也不重签旧封存报告。
 
-旧 `evals/run_baseline.py` 保留为 26 条归档、3 组手选标签的 seed-sanity 烟测，不属于 G1 金标或独立算法成果。校验、单步包、B0–B4 回放和独立评测命令见[离线说明](evals/intelligence_v1/README.md)。当前输入 pin、实际回归、复现与限制见 [AI 批次收尾记录](evals/intelligence_v1/reports/PR5_AI_DEVELOPMENT.md)；[PR1 冻结记录](evals/intelligence_v1/G1_BASELINE_LOCK.md)、[PR2 修复记录](evals/intelligence_v1/reports/PR2_REVIEW_FIXES.md)、[PR3 v1](evals/intelligence_v1/reports/PR3_ACCEPTANCE.md)、[PR3 v2 修复](evals/intelligence_v1/reports/PR3_SPLIT_REVIEW_FIX.md)、[PR4 验收记录](evals/intelligence_v1/reports/PR4_ACCEPTANCE.md)和 [AI 规则变更记录](evals/intelligence_v1/reports/AI_DEVELOPMENT_POLICY.md)保留对应版本的历史证据。可选真人研究未测，不阻塞默认 AI 开发验收。
+主要入口是 `backend/cfaw_news/briefing/` 与 `frontend/src/ReaderApp.tsx`。实现、真实开发检查与限制见 [内容引擎说明](docs/CONTENT_ENGINE.md)；范围和后续方向见 [开发计划](docs/plans/AI_INFORMATION_QUALITY_IMPLEMENTATION_PLAN.md)。
 
-本机检查、mock、真实模型、真实来源、远端 CI 和部署分别报告。仓库中的 Linux/Docker/GitHub Actions 配置不等于本轮已执行或部署。
+## 数据与当前限制
 
-## 数据、出处与工程说明
+- 当前是本机单用户开发版，不提供生产鉴权、公网部署或多用户隔离。
+- 数据默认保存在 `.local/briefing-v2.db`；旧个人库与 `data/archive/articles.json` 的迁移出处保留。
+- 事件聚合使用具体事件框架和原文指纹；跨语言去重、长尾召回与摘要语义仍可能出错，尚未实现向量检索。
+- 真实材料、AI 开发标签、合成样例与用户反馈分开记录；小样本结果不等于独立研究结论或普遍准确率。
+- `.env`、`.local/`、`.tmp/`、虚拟环境、依赖、生成的 `frontend/dist/` 和 `dev-diaries/` 均不提交 Git。开发日记与私人数据永远仅保留在本地。
+- 能抓到公开内容不代表拥有全文再分发权限；当前保存必要节选和出处，没有对外全文发布服务。
 
-- [现有架构](docs/ARCHITECTURE.md)：兼容工程、证据/版本/取消/批准边界。
-- [迁移记录](docs/MIGRATION.md)：原始资产与溯源；`data/archive/articles.json` 和 `data/sources.json` 必须保留。
-- [隐私与数据说明](PRIVACY.md)：本地数据、外部请求和模型发送范围。
-- [Apache-2.0](LICENSE) 与 [NOTICE](NOTICE)：代码许可、原作品、新闻与第三方资产署名。
-
-`.env`、`.local/`、私人数据库、依赖目录、生成物和 `dev-diaries/` 不进入 Git。开发日记永远本地。公开访问来源不意味着允许公开再分发全文；V1 仍以本地单用户为验收环境，不能声称已经具备生产鉴权、多租户隔离或部署能力。
-
-## G2 开发验收（2026-10-26）
-
-G2-PR1–PR6 已完成离线工程验收，`g2_development=PASS`，管理员验收为 `accepted`。
-当前状态、公开 pin 和研究限制见 [G2 发布说明](docs/G2_PUBLICATION.md)，
-接口边界见 [G2 → G3 交接契约](docs/G2_G3_HANDOFF.md)。
-上方 G1 段落保留前序阶段语境。G3-PR1/PR2 已通过独立工程审查；PR3/PR4 的独立复审为 PASS WITH CONDITIONS，全量回归继续使用项目内临时目录，并把可评估的预算遗漏保留在分母。PR4 已实现独立阅读预算 planner，支持 180/420/900 秒、版本化 Focus/Radar 比例及完整 Archive。接口与估时限制见 [G3 离线说明](evals/intelligence_g3/README.md)，[PR4 交付](evals/intelligence_g3/reports/PR4_DELIVERY.md)与[诊断修复](evals/intelligence_g3/reports/PR4_DIAGNOSTICS_FIX.md)保留历史版本证据。
-
-所有者批准后已实施 G3-PR5 的复现矩阵、验收门禁、报告和交接。前一轮测试控制面、回访支持规模及 schema 检查修复见 [PR5 审查修复报告](evals/intelligence_g3/reports/PR5_REVIEW_FIXES.md)。比较符号丢失导致实质条件更新被误认为已知重复的 P1 已完成修复、原生反例回归、完整矩阵及本地离线验收，证据见[事实签名修复报告](evals/intelligence_g3/reports/FACT_SIGNATURE_REVIEW_FIX.md)。当前 PR5 仍待独立复审关闭及所有者最终验收；G3 尚未最终验收，G4 未授权。后续入口与条件见 [G3 → G4 交接](docs/G3_G4_HANDOFF.md)。所有结果均为非盲合成 AI 开发检查，不证明生产就绪或真人效果；未接入前端、在线 API、生产数据库、真实模型或新采集。
+代码许可：[Apache-2.0](LICENSE)；第三方资产见 [NOTICE](NOTICE)。旧 G1–G4 文档保留其原始研究与验收含义，不作为新内容引擎已实现能力或质量提升的证明。

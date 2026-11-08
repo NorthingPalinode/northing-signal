@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cfaw-news"
 version = "0.2.0"
-description = "A standalone evidence workspace for personal goals"
+description = "A local AI intelligence reader with evidence and confirmed topic tracking"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "sqlalchemy>=2.0,<3",
@@ -23,7 +23,7 @@ where = ["backend"]
 cfaw_news = ["prompts/*.txt"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests_reader", "tests/test_media.py"]
 pythonpath = ["backend"]
 
 [tool.ruff]

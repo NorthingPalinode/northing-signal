@@ -1,0 +1,18 @@
+{
+  "revision": "ai-sources-v1",
+  "note": "Small public feed candidate pool. Retain bounded feed excerpts and original links; no full-article redistribution. Feed availability is observed on each refresh, never assumed from this list.",
+  "sources": [
+    {"id":"openai","name":"OpenAI","role":"official","url":"https://openai.com/news/rss.xml","hosts":["openai.com"],"kind":"rss"},
+    {"id":"deepmind","name":"Google DeepMind","role":"research","url":"https://deepmind.google/blog/rss.xml","hosts":["deepmind.google","deepmind.google.com"],"kind":"rss"},
+    {"id":"google-research","name":"Google Research","role":"research","url":"https://research.google/blog/rss/","hosts":["research.google"],"kind":"rss"},
+    {"id":"huggingface","name":"Hugging Face","role":"official","url":"https://huggingface.co/blog/feed.xml","hosts":["huggingface.co"],"kind":"rss"},
+    {"id":"microsoft-research","name":"Microsoft Research","role":"research","url":"https://www.microsoft.com/en-us/research/feed/","hosts":["www.microsoft.com"],"kind":"rss"},
+    {"id":"nvidia","name":"NVIDIA","role":"official","url":"https://blogs.nvidia.com/feed/","hosts":["blogs.nvidia.com"],"kind":"rss"},
+    {"id":"github-ai","name":"GitHub · AI & ML","role":"official","url":"https://github.blog/ai-and-ml/feed/","hosts":["github.blog"],"kind":"rss"},
+    {"id":"bair","name":"Berkeley AI Research","role":"research","url":"https://bair.berkeley.edu/blog/feed.xml","hosts":["bair.berkeley.edu"],"kind":"rss"},
+    {"id":"techcrunch-ai","name":"TechCrunch · AI","role":"media","url":"https://techcrunch.com/category/artificial-intelligence/feed/","hosts":["techcrunch.com"],"kind":"rss"},
+    {"id":"decoder","name":"The Decoder","role":"media","url":"https://the-decoder.com/feed/","hosts":["the-decoder.com"],"kind":"rss"},
+    {"id":"simon","name":"Simon Willison","role":"author","url":"https://simonwillison.net/atom/everything/","hosts":["simonwillison.net"],"kind":"rss"},
+    {"id":"vllm-release","name":"vLLM · 开源发布","role":"official","url":"https://api.github.com/repos/vllm-project/vllm/releases?per_page=12","hosts":["api.github.com"],"kind":"releases"}
+  ]
+}

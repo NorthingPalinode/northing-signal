@@ -1,0 +1,281 @@
+"""A separate SQLite file: immutable material revisions and append-only reader actions."""
+
+import json
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+from uuid import uuid4
+
+from .models import Interaction, Material, Preferences, digest, now
+
+
+class Store:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.connection() as db:
+            db.executescript("""
+                PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS materials (
+                    version TEXT PRIMARY KEY, id TEXT NOT NULL, captured_at TEXT NOT NULL,
+                    data TEXT NOT NULL, UNIQUE(id, version));
+                CREATE TABLE IF NOT EXISTS judgments (
+                    version TEXT NOT NULL, policy TEXT NOT NULL, data TEXT NOT NULL,
+                    model TEXT NOT NULL, created_at TEXT NOT NULL,
+                    PRIMARY KEY(version, policy));
+                CREATE TABLE IF NOT EXISTS source_states (
+                    id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS preferences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS interactions (
+                    id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, data TEXT NOT NULL,
+                    created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS receipts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS visits (
+                    id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS follows (
+                    id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS follow_drafts (
+                    id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS intent_assessments (
+                    plan_hash TEXT NOT NULL, version TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(plan_hash, version));
+            """)
+
+    @contextmanager
+    def connection(self):
+        db = sqlite3.connect(self.path, timeout=15)
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA foreign_keys=ON")
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    @staticmethod
+    def encoded(value):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    def capture(self, material: Material):
+        with self.connection() as db:
+            old = db.execute("SELECT data FROM materials WHERE version=?", (material.version,)).fetchone()
+            if old:
+                fixed = {"origin", "source_role", "source_id", "url"}
+                previous = json.loads(old["data"])
+                if any(previous[k] != getattr(material, k) for k in fixed):
+                    raise ValueError("immutable_material_metadata_conflict")
+            return db.execute("INSERT OR IGNORE INTO materials VALUES (?, ?, ?, ?)",
+                              (material.version, material.id, material.captured_at,
+                               material.model_dump_json())).rowcount == 1
+
+    def materials(self):
+        with self.connection() as db:
+            rows = db.execute("""SELECT data FROM (
+                SELECT data, ROW_NUMBER() OVER (PARTITION BY id ORDER BY rowid DESC) AS n
+                FROM materials) WHERE n=1""").fetchall()
+        return [Material.model_validate_json(row["data"]) for row in rows]
+
+    def material(self, version):
+        with self.connection() as db:
+            row = db.execute("SELECT data FROM materials WHERE version=?", (version,)).fetchone()
+        return Material.model_validate_json(row["data"]) if row else None
+
+    def judgments(self, policy):
+        with self.connection() as db:
+            rows = db.execute("SELECT version, data, model FROM judgments WHERE policy=?", (policy,)).fetchall()
+        return {r["version"]: {**json.loads(r["data"]), "model": r["model"]} for r in rows}
+
+    def judge(self, version, policy, value, model):
+        with self.connection() as db:
+            db.execute("INSERT OR IGNORE INTO judgments VALUES (?, ?, ?, ?, ?)",
+                       (version, policy, self.encoded(value), model, now()))
+
+    def source_state(self, source_id, value):
+        with self.connection() as db:
+            db.execute("INSERT OR REPLACE INTO source_states VALUES (?, ?)",
+                       (source_id, self.encoded(value)))
+
+    def source_states(self):
+        with self.connection() as db:
+            return {r["id"]: json.loads(r["data"]) for r in db.execute("SELECT * FROM source_states")}
+
+    def preferences(self):
+        with self.connection() as db:
+            row = db.execute("SELECT data FROM preferences ORDER BY id DESC LIMIT 1").fetchone()
+        return Preferences.model_validate_json(row["data"]) if row else Preferences()
+
+    def save_preferences(self, value: Preferences):
+        with self.connection() as db:
+            db.execute("INSERT INTO preferences(data, created_at) VALUES (?, ?)",
+                       (value.model_dump_json(), now()))
+
+    def interact(self, value: Interaction):
+        payload = value.model_dump()
+        fingerprint = digest(payload)
+        with self.connection() as db:
+            old = db.execute("SELECT fingerprint FROM interactions WHERE id=?", (value.request_id,)).fetchone()
+            if old:
+                if old["fingerprint"] != fingerprint:
+                    raise ValueError("同一操作编号不能改变内容")
+                return False
+            if value.kind == "retract":
+                target = db.execute("SELECT data FROM interactions WHERE id=?", (value.retracts,)).fetchone()
+                old = json.loads(target["data"]) if target else None
+                if (not old or old["event_id"] != value.event_id or old["version"] != value.version
+                        or old["kind"] in {"retract", "shown", "opened"}):
+                    raise ValueError("找不到可撤回的操作")
+            db.execute("INSERT INTO interactions VALUES (?, ?, ?, ?)",
+                       (value.request_id, fingerprint, self.encoded(payload), now()))
+        return True
+
+    def interactions(self):
+        with self.connection() as db:
+            return [{**json.loads(r["data"]), "at": r["created_at"]}
+                    for r in db.execute("SELECT * FROM interactions ORDER BY rowid")]
+
+    def receipt(self, value):
+        with self.connection() as db:
+            db.execute("INSERT INTO receipts(data, created_at) VALUES (?, ?)", (self.encoded(value), now()))
+
+    def reserve_request(self, value, requests_limit, tokens_limit):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = ([json.loads(r["data"]) for r in db.execute(
+                "SELECT data FROM receipts WHERE created_at >= ?", (now()[:10],))]
+                if requests_limit is not None or tokens_limit is not None else [])
+            if ((requests_limit is not None and len(rows) >= requests_limit)
+                    or (tokens_limit is not None and
+                        sum(r.get("charged_tokens", 0) for r in rows) + value["charged_tokens"] > tokens_limit)):
+                raise ValueError("daily_model_budget_reached")
+            cursor = db.execute("INSERT INTO receipts(data, created_at) VALUES (?, ?)",
+                                (self.encoded(value), now()))
+            return cursor.lastrowid
+
+    def finish_request(self, receipt_id, value):
+        with self.connection() as db:
+            db.execute("UPDATE receipts SET data=? WHERE id=?", (self.encoded(value), receipt_id))
+
+    def visit(self, request_id):
+        with self.connection() as db:
+            db.execute("INSERT OR IGNORE INTO visits VALUES (?, ?)", (request_id, now()))
+
+    def last_visit(self):
+        with self.connection() as db:
+            row = db.execute("SELECT created_at FROM visits ORDER BY rowid DESC LIMIT 1").fetchone()
+            return row["created_at"] if row else None
+
+    def snapshots(self, key=None):
+        with self.connection() as db:
+            if key:
+                row = db.execute("SELECT data FROM snapshots WHERE id=?", (key,)).fetchone()
+                return json.loads(row["data"]) if row else None
+            return [{"id": r["id"], "created_at": r["created_at"]}
+                    for r in db.execute("SELECT id, created_at FROM snapshots ORDER BY rowid DESC LIMIT 20")]
+
+    def receipts_today(self):
+        with self.connection() as db:
+            rows = db.execute("SELECT data FROM receipts WHERE created_at >= ?", (now()[:10],)).fetchall()
+        return [json.loads(r["data"]) for r in rows]
+
+    def snapshot(self, value):
+        key = digest([now(), value])[:24]
+        with self.connection() as db:
+            db.execute("INSERT INTO snapshots VALUES (?, ?, ?)", (key, self.encoded(value), now()))
+        return key
+
+    def follows(self):
+        with self.connection() as db:
+            rows = [json.loads(row["data"]) for row in db.execute("SELECT data FROM follows ORDER BY rowid")]
+        return [row for row in rows if not row.get("archived")]
+
+    def save_follow(self, value):
+        name, query = value.name.strip(), (value.query or value.name).strip()
+        if len(name) < 2 or len(query) < 2:
+            raise ValueError("请输入至少两个字的话题或检索词")
+        key = digest(query.casefold())[:24]
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM follows WHERE id=?", (key,)).fetchone()
+            previous = json.loads(row["data"]) if row else None
+            count = sum(not json.loads(row["data"]).get("archived")
+                        for row in db.execute("SELECT data FROM follows"))
+            if count >= 12 and (not previous or previous.get("archived")):
+                raise ValueError("最多关注 12 个话题，请先取消不再需要的话题")
+            data = {"id": key, "created_at": now(), "last_checked": None, "last_status": "not_checked",
+                    "material_ids": [], "seen_versions": [], **(previous or {}),
+                    "name": name, "query": query, "active": value.active, "archived": False}
+            db.execute("INSERT OR REPLACE INTO follows VALUES (?, ?)", (key, self.encoded(data)))
+        return data
+
+    def update_follow(self, key, **changes):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM follows WHERE id=?", (key,)).fetchone()
+            if not row or json.loads(row["data"]).get("archived"):
+                raise ValueError("这个关注话题不存在")
+            data = {**json.loads(row["data"]), **changes}
+            db.execute("UPDATE follows SET data=? WHERE id=?", (self.encoded(data), key))
+        return data
+
+    def create_follow_draft(self, description, plan, follow_id=None):
+        previous = next((f for f in self.follows() if f["id"] == follow_id), None)
+        if follow_id and not previous:
+            raise ValueError("这个关注话题不存在")
+        value = {"id": uuid4().hex, "description": description, "plan": plan.model_dump(),
+                 "follow_id": follow_id, "base_plan_hash": previous.get("plan_hash") if previous else None,
+                 "created_at": now(), "confirmed_at": None}
+        with self.connection() as db:
+            db.execute("INSERT INTO follow_drafts VALUES (?, ?)", (value["id"], self.encoded(value)))
+        return value
+
+    def confirm_follow(self, confirmation):
+        plan = confirmation.plan.model_dump()
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM follow_drafts WHERE id=?", (confirmation.draft_id,)).fetchone()
+            if not row:
+                raise ValueError("追踪方案草稿不存在，请重新理解需求")
+            draft = json.loads(row["data"])
+            plan_hash = digest([draft["description"], plan])
+            if draft["confirmed_at"]:
+                if draft["plan_hash"] != plan_hash or draft["active"] != confirmation.active:
+                    raise ValueError("这份草稿已确认，修改需求请重新生成方案")
+                row = db.execute("SELECT data FROM follows WHERE id=?", (draft["follow_id"],)).fetchone()
+                value = json.loads(row["data"]) if row else None
+                if not value or value.get("archived") or value.get("plan_hash") != plan_hash:
+                    raise ValueError("此确认已过期，请读取当前追踪方案")
+                return value, False
+            rows = [json.loads(r["data"]) for r in db.execute("SELECT data FROM follows")]
+            previous = next((r for r in rows if r["id"] == draft["follow_id"] and not r.get("archived")), None)
+            if draft["follow_id"] and not previous:
+                raise ValueError("原关注话题已取消，不能替换方案")
+            if previous and draft.get("base_plan_hash") != previous.get("plan_hash"):
+                raise ValueError("追踪方案已发生变化，请重新理解并确认")
+            if not previous and sum(not r.get("archived") for r in rows) >= 12:
+                raise ValueError("最多关注 12 个话题，请先取消不再需要的话题")
+            key = previous["id"] if previous else uuid4().hex[:24]
+            value = {"id": key, "created_at": now(), "material_ids": [], **(previous or {}),
+                     "name": plan["title"], "query": plan["searches"][0]["query"] if plan["searches"] else plan["title"],
+                     "description": draft["description"], "intent_plan": plan, "plan_hash": plan_hash,
+                     "confirmed_at": now(), "draft_id": draft["id"], "active": confirmation.active,
+                     "archived": False, "last_checked": None, "last_status": "not_checked",
+                     "seen_versions": [], "search_cursor": 0}
+            draft.update(confirmed_at=value["confirmed_at"], follow_id=key, plan=plan,
+                         plan_hash=plan_hash, active=confirmation.active)
+            db.execute("INSERT OR REPLACE INTO follows VALUES (?, ?)", (key, self.encoded(value)))
+            db.execute("UPDATE follow_drafts SET data=? WHERE id=?", (self.encoded(draft), draft["id"]))
+        return value, True
+
+    def intent_assessments(self, plan_hash):
+        with self.connection() as db:
+            return {r["version"]: json.loads(r["data"]) for r in db.execute(
+                "SELECT version,data FROM intent_assessments WHERE plan_hash=?", (plan_hash,))}
+
+    def assess_intent(self, plan_hash, values):
+        with self.connection() as db:
+            db.executemany("INSERT OR IGNORE INTO intent_assessments VALUES (?, ?, ?)",
+                           [(plan_hash, version, self.encoded(value)) for version, value in values.items()])

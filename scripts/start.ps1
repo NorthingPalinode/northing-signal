@@ -40,7 +40,7 @@ try {
     }
     if (-not (Test-Path -LiteralPath 'frontend\dist\index.html')) { throw 'Frontend build is missing. Run without -SkipInstall.' }
     Write-Host "CFAW News: http://127.0.0.1:$Port  (Ctrl+C to stop)"
-    $taskArguments = @('-m', 'uvicorn', 'cfaw_news.main:create_app', '--factory', '--host', '127.0.0.1', '--port', "$Port")
+    $taskArguments = @('-m', 'uvicorn', 'cfaw_news.briefing.app:create_app', '--factory', '--host', '127.0.0.1', '--port', "$Port")
     if ($Reload) { $taskArguments += @('--reload', '--reload-dir', 'backend') }
     & $taskVenvPython @taskArguments
     if ($LASTEXITCODE -ne 0) { throw 'Server failed to start. Check the port and the error above.' }
