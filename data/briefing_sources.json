@@ -1,18 +1,624 @@
 {
-  "revision": "ai-sources-v1",
-  "note": "Small public feed candidate pool. Retain bounded feed excerpts and original links; no full-article redistribution. Feed availability is observed on each refresh, never assumed from this list.",
+  "revision": "ai-sources-v2",
+  "note": "Public subscriptions, publisher indexes and bounded structured catalogs. Each refresh observes availability. Listing-only records remain leads; benchmark excerpts are not independent validation. No authenticated/paid source is enabled without project configuration.",
   "sources": [
-    {"id":"openai","name":"OpenAI","role":"official","url":"https://openai.com/news/rss.xml","hosts":["openai.com"],"kind":"rss"},
-    {"id":"deepmind","name":"Google DeepMind","role":"research","url":"https://deepmind.google/blog/rss.xml","hosts":["deepmind.google","deepmind.google.com"],"kind":"rss"},
-    {"id":"google-research","name":"Google Research","role":"research","url":"https://research.google/blog/rss/","hosts":["research.google"],"kind":"rss"},
-    {"id":"huggingface","name":"Hugging Face","role":"official","url":"https://huggingface.co/blog/feed.xml","hosts":["huggingface.co"],"kind":"rss"},
-    {"id":"microsoft-research","name":"Microsoft Research","role":"research","url":"https://www.microsoft.com/en-us/research/feed/","hosts":["www.microsoft.com"],"kind":"rss"},
-    {"id":"nvidia","name":"NVIDIA","role":"official","url":"https://blogs.nvidia.com/feed/","hosts":["blogs.nvidia.com"],"kind":"rss"},
-    {"id":"github-ai","name":"GitHub · AI & ML","role":"official","url":"https://github.blog/ai-and-ml/feed/","hosts":["github.blog"],"kind":"rss"},
-    {"id":"bair","name":"Berkeley AI Research","role":"research","url":"https://bair.berkeley.edu/blog/feed.xml","hosts":["bair.berkeley.edu"],"kind":"rss"},
-    {"id":"techcrunch-ai","name":"TechCrunch · AI","role":"media","url":"https://techcrunch.com/category/artificial-intelligence/feed/","hosts":["techcrunch.com"],"kind":"rss"},
-    {"id":"decoder","name":"The Decoder","role":"media","url":"https://the-decoder.com/feed/","hosts":["the-decoder.com"],"kind":"rss"},
-    {"id":"simon","name":"Simon Willison","role":"author","url":"https://simonwillison.net/atom/everything/","hosts":["simonwillison.net"],"kind":"rss"},
-    {"id":"vllm-release","name":"vLLM · 开源发布","role":"official","url":"https://api.github.com/repos/vllm-project/vllm/releases?per_page=12","hosts":["api.github.com"],"kind":"releases"}
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "role": "official",
+      "url": "https://openai.com/news/rss.xml",
+      "hosts": [
+        "openai.com"
+      ],
+      "kind": "rss",
+      "priority": 0
+    },
+    {
+      "id": "deepmind",
+      "name": "Google DeepMind",
+      "role": "research",
+      "url": "https://deepmind.google/blog/rss.xml",
+      "hosts": [
+        "deepmind.google",
+        "deepmind.google.com"
+      ],
+      "kind": "rss",
+      "priority": 0
+    },
+    {
+      "id": "vllm-release",
+      "name": "vLLM · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/vllm-project/vllm/releases?per_page=12",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "original_url": "https://github.com/vllm-project/vllm/releases"
+    },
+    {
+      "id": "anthropic-news",
+      "name": "Anthropic · 官网发布",
+      "role": "official",
+      "url": "https://www.anthropic.com/news",
+      "hosts": [
+        "www.anthropic.com"
+      ],
+      "kind": "publisher_index",
+      "priority": 0,
+      "article_hosts": [
+        "www.anthropic.com"
+      ],
+      "path_pattern": "^/(?:news/(?!announcements/?$|features/?$|partnerships/?$)[^/]+|research/[^/]+|claude-[^/]+)/?$",
+      "max_items": 8,
+      "description": "官网更新先收录链接，补读原文后才整理；不把列表当正文。"
+    },
+    {
+      "id": "deepseek-updates",
+      "name": "DeepSeek · API 更新日志",
+      "role": "official",
+      "url": "https://api-docs.deepseek.com/updates/",
+      "hosts": [
+        "api-docs.deepseek.com"
+      ],
+      "kind": "changelog",
+      "priority": 0,
+      "max_items": 6
+    },
+    {
+      "id": "kimi-updates",
+      "name": "Kimi · 平台更新日志",
+      "role": "official",
+      "url": "https://platform.kimi.com/docs/changelog",
+      "hosts": [
+        "platform.kimi.com"
+      ],
+      "kind": "document",
+      "priority": 0,
+      "max_items": 1,
+      "description": "当前公开更新日志节选，保留修订；页面抓取时间不作为模型发布时间。"
+    },
+    {
+      "id": "minimax-news",
+      "name": "MiniMax · 研究与发布",
+      "role": "official",
+      "url": "https://www.minimax.io/blog",
+      "hosts": [
+        "www.minimax.io"
+      ],
+      "kind": "publisher_index",
+      "priority": 0,
+      "article_hosts": [
+        "www.minimax.io"
+      ],
+      "path_pattern": "^/(?:blog|news)/[^/]+/?$",
+      "max_items": 8,
+      "description": "官网更新先收录链接，补读原文后才整理；不把列表当正文。"
+    },
+    {
+      "id": "seed-news",
+      "name": "ByteDance Seed · 官网发布",
+      "role": "official",
+      "url": "https://seed.bytedance.com/en/",
+      "hosts": [
+        "seed.bytedance.com"
+      ],
+      "kind": "publisher_index",
+      "priority": 0,
+      "article_hosts": [
+        "seed.bytedance.com"
+      ],
+      "path_pattern": "^/en/blog/[^/]+/?$",
+      "max_items": 8,
+      "description": "官网更新先收录链接，补读原文后才整理；不把列表当正文。"
+    },
+    {
+      "id": "meta-news",
+      "name": "Meta AI · 官网发布",
+      "role": "official",
+      "url": "https://ai.meta.com/blog/",
+      "hosts": [
+        "ai.meta.com"
+      ],
+      "kind": "publisher_index",
+      "priority": 0,
+      "article_hosts": [
+        "ai.meta.com"
+      ],
+      "path_pattern": "^/blog/[^/]+/?$",
+      "max_items": 8,
+      "description": "官网更新先收录链接，补读原文后才整理；不把列表当正文。"
+    },
+    {
+      "id": "xai-news",
+      "name": "xAI · 官网发布",
+      "role": "official",
+      "url": "https://x.ai/news",
+      "hosts": [
+        "x.ai"
+      ],
+      "kind": "publisher_index",
+      "priority": 0,
+      "article_hosts": [
+        "x.ai"
+      ],
+      "path_pattern": "^/news/[^/]+/?$",
+      "max_items": 8,
+      "description": "官网更新先收录链接，补读原文后才整理；不把列表当正文。"
+    },
+    {
+      "id": "mistral-news",
+      "name": "Mistral · 官网发布",
+      "role": "official",
+      "url": "https://mistral.ai/news/",
+      "hosts": [
+        "mistral.ai"
+      ],
+      "kind": "publisher_index",
+      "priority": 0,
+      "article_hosts": [
+        "mistral.ai"
+      ],
+      "path_pattern": "^/news/[^/]+/?$",
+      "max_items": 8,
+      "description": "官网更新先收录链接，补读原文后才整理；不把列表当正文。"
+    },
+    {
+      "id": "sglang-release",
+      "name": "SGLang · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/sgl-project/sglang/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/sgl-project/sglang/releases"
+    },
+    {
+      "id": "llamacpp-release",
+      "name": "llama.cpp · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/ggml-org/llama.cpp/releases"
+    },
+    {
+      "id": "ollama-release",
+      "name": "Ollama · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/ollama/ollama/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/ollama/ollama/releases"
+    },
+    {
+      "id": "transformers-release",
+      "name": "Transformers · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/huggingface/transformers/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/huggingface/transformers/releases"
+    },
+    {
+      "id": "langgraph-release",
+      "name": "LangGraph · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/langchain-ai/langgraph/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/langchain-ai/langgraph/releases"
+    },
+    {
+      "id": "kimi-code-release",
+      "name": "Kimi Code · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/MoonshotAI/kimi-code/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/MoonshotAI/kimi-code/releases"
+    },
+    {
+      "id": "claude-code-release",
+      "name": "Claude Code · 开源发布",
+      "role": "official",
+      "url": "https://api.github.com/repos/anthropics/claude-code/releases?per_page=6",
+      "hosts": [
+        "api.github.com"
+      ],
+      "kind": "releases",
+      "priority": 0,
+      "max_items": 6,
+      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
+      "original_url": "https://github.com/anthropics/claude-code/releases"
+    },
+    {
+      "id": "hf-qwen",
+      "name": "Qwen · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=Qwen&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "Qwen",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/Qwen"
+    },
+    {
+      "id": "hf-deepseek",
+      "name": "DeepSeek · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=deepseek-ai&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "deepseek-ai",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/deepseek-ai"
+    },
+    {
+      "id": "hf-kimi",
+      "name": "Kimi · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=moonshotai&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "moonshotai",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/moonshotai"
+    },
+    {
+      "id": "hf-glm",
+      "name": "GLM / Z.ai · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=zai-org&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "zai-org",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/zai-org"
+    },
+    {
+      "id": "hf-minimax",
+      "name": "MiniMax · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=MiniMaxAI&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "MiniMaxAI",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/MiniMaxAI"
+    },
+    {
+      "id": "hf-seed",
+      "name": "ByteDance Seed · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=ByteDance-Seed&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "ByteDance-Seed",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/ByteDance-Seed"
+    },
+    {
+      "id": "hf-meta",
+      "name": "Meta Llama · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=meta-llama&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "meta-llama",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/meta-llama"
+    },
+    {
+      "id": "hf-mistral",
+      "name": "Mistral · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=mistralai&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 0,
+      "organization": "mistralai",
+      "max_items": 6,
+      "description": "按官方组织发现模型；每批最多补读一份公开模型卡，仓库更新时间不作为发布日期。",
+      "original_url": "https://huggingface.co/mistralai"
+    },
+    {
+      "id": "arxiv-recent",
+      "name": "arXiv · AI / 语言 / 学习 / 视觉",
+      "role": "research",
+      "url": "https://export.arxiv.org/api/query?search_query=cat%3Acs.AI+OR+cat%3Acs.CL+OR+cat%3Acs.LG+OR+cat%3Acs.CV&sortBy=submittedDate&sortOrder=descending&max_results=12",
+      "hosts": [
+        "export.arxiv.org"
+      ],
+      "kind": "arxiv",
+      "priority": 0,
+      "max_items": 12,
+      "description": "预印本索引摘要，不代表论文全文、同行评审或独立验证。"
+    },
+    {
+      "id": "google-research",
+      "name": "Google Research",
+      "role": "research",
+      "url": "https://research.google/blog/rss/",
+      "hosts": [
+        "research.google"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "role": "official",
+      "url": "https://huggingface.co/blog/feed.xml",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "microsoft-research",
+      "name": "Microsoft Research",
+      "role": "research",
+      "url": "https://www.microsoft.com/en-us/research/feed/",
+      "hosts": [
+        "www.microsoft.com"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA",
+      "role": "official",
+      "url": "https://blogs.nvidia.com/feed/",
+      "hosts": [
+        "blogs.nvidia.com"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "github-ai",
+      "name": "GitHub · AI & ML",
+      "role": "official",
+      "url": "https://github.blog/ai-and-ml/feed/",
+      "hosts": [
+        "github.blog"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "bair",
+      "name": "Berkeley AI Research",
+      "role": "research",
+      "url": "https://bair.berkeley.edu/blog/feed.xml",
+      "hosts": [
+        "bair.berkeley.edu"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "techcrunch-ai",
+      "name": "TechCrunch · AI",
+      "role": "media",
+      "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+      "hosts": [
+        "techcrunch.com"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "decoder",
+      "name": "The Decoder",
+      "role": "media",
+      "url": "https://the-decoder.com/feed/",
+      "hosts": [
+        "the-decoder.com"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "simon",
+      "name": "Simon Willison",
+      "role": "author",
+      "url": "https://simonwillison.net/atom/everything/",
+      "hosts": [
+        "simonwillison.net"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "hf-daily-papers",
+      "name": "Hugging Face · Daily Papers",
+      "role": "community",
+      "url": "https://huggingface.co/api/daily_papers?limit=8",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "daily_papers",
+      "priority": 1,
+      "max_items": 8,
+      "description": "社区论文发现入口，取得的是论文索引摘要；热度不是质量证明。"
+    },
+    {
+      "id": "interconnects",
+      "name": "Interconnects · Nathan Lambert",
+      "role": "author",
+      "url": "https://www.interconnects.ai/feed",
+      "hosts": [
+        "www.interconnects.ai"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6
+    },
+    {
+      "id": "latent-space",
+      "name": "Latent Space / AI News",
+      "role": "author",
+      "url": "https://latent.space/feed",
+      "hosts": [
+        "latent.space",
+        "www.latent.space"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "description": "包含已迁入的 AI News；不再把旧 news.smol.ai 算作独立来源。"
+    },
+    {
+      "id": "qbitai",
+      "name": "量子位 · 公开 RSS",
+      "role": "media",
+      "url": "https://www.qbitai.com/feed",
+      "hosts": [
+        "www.qbitai.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "description": "短摘要需补读原文；不把搜索、索引或标题当成实测。"
+    },
+    {
+      "id": "arena-text",
+      "name": "Arena · 文本偏好榜单",
+      "role": "research",
+      "url": "https://datasets-server.huggingface.co/rows?dataset=lmarena-ai%2Fleaderboard-dataset&config=text&split=latest&offset=0&length=12",
+      "hosts": [
+        "datasets-server.huggingface.co"
+      ],
+      "kind": "arena",
+      "priority": 1,
+      "max_items": 1,
+      "original_url": "https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset",
+      "description": "当前文本榜 overall 的有界数据节选，保留票数、区间与日期；不是本项目复测。"
+    },
+    {
+      "id": "swebench-verified",
+      "name": "SWE-bench Verified · 公开结果",
+      "role": "research",
+      "url": "https://raw.githubusercontent.com/SWE-bench/swe-bench.github.io/master/data/leaderboards.json",
+      "hosts": [
+        "raw.githubusercontent.com"
+      ],
+      "kind": "swebench",
+      "priority": 1,
+      "max_items": 1,
+      "max_bytes": 5000000,
+      "original_url": "https://www.swebench.com/",
+      "description": "官方数据中近期提交的有界节选，保留 checked 状态、系统及条件；不把提交一律当独立测试。"
+    },
+    {
+      "id": "livebench-updates",
+      "name": "LiveBench · 官方更新记录",
+      "role": "research",
+      "url": "https://raw.githubusercontent.com/LiveBench/LiveBench/main/changelog.md",
+      "hosts": [
+        "raw.githubusercontent.com"
+      ],
+      "kind": "markdown",
+      "priority": 1,
+      "max_items": 1,
+      "original_url": "https://github.com/LiveBench/LiveBench/blob/main/changelog.md",
+      "description": "仅接入官方更新记录，尚非完整实时榜单。"
+    },
+    {
+      "id": "hf-tencent",
+      "name": "Tencent · 模型目录与模型卡",
+      "role": "official",
+      "url": "https://huggingface.co/api/models?author=tencent&sort=lastModified&direction=-1&limit=6&full=true",
+      "hosts": [
+        "huggingface.co"
+      ],
+      "kind": "hub_models",
+      "priority": 1,
+      "organization": "tencent",
+      "max_items": 6,
+      "description": "腾讯公开模型目录；覆盖不限于混元，目录不等于混元官网全部发布。",
+      "original_url": "https://huggingface.co/tencent"
+    },
+    {
+      "id": "modelscope-qwen",
+      "name": "ModelScope · Qwen 公开目录",
+      "role": "official",
+      "url": "https://modelscope.cn/openapi/v1/models?owner=Qwen&page_number=1&page_size=6",
+      "hosts": [
+        "modelscope.cn",
+        "www.modelscope.cn"
+      ],
+      "kind": "modelscope_models",
+      "priority": 1,
+      "organization": "Qwen",
+      "max_items": 6,
+      "description": "仅接入 Qwen 公开模型元数据，正文仍待补充；与 HF 上同一模型不构成独立证据。",
+      "original_url": "https://modelscope.cn/models"
+    }
   ]
 }

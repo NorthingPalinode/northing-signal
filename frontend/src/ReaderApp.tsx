@@ -94,6 +94,7 @@ type Follow = {
 type Source = {
   id: string;
   description?: string;
+  priority?: number;
   name: string;
   role: string;
   url: string;
@@ -104,6 +105,8 @@ type Source = {
     last_success?: string;
     count?: number;
     added?: number;
+    with_text?: number;
+    http_status?: number;
     error?: string;
   };
 };
@@ -198,7 +201,9 @@ const when = (value?: string | null) => {
     : "时间未确认";
 };
 const evidence = (value: string, role?: string, kind?: string) =>
-  kind === "index_abstract"
+  kind === "benchmark_snapshot"
+    ? "公开榜单数据"
+    : kind === "index_abstract"
     ? "索引摘要"
     : kind === "community_post"
       ? "社区发言"
@@ -1661,7 +1666,9 @@ export default function ReaderApp() {
             )}
             <section>
               <h3>
-                {detail.content_kind === "index_abstract"
+                {detail.content_kind === "benchmark_snapshot"
+                  ? "榜单数据中的依据"
+                  : detail.content_kind === "index_abstract"
                   ? "索引摘要支持的主张"
                   : detail.content_kind === "community_post"
                     ? "社区发言中的主张"
@@ -1690,7 +1697,9 @@ export default function ReaderApp() {
                     .catch((e) => setError(e.message))
                 }
               >
-                {detail.content_kind === "index_abstract"
+                {detail.content_kind === "benchmark_snapshot"
+                  ? "查看取得的榜单数据"
+                  : detail.content_kind === "index_abstract"
                   ? "展开本次保存的索引摘要"
                   : detail.content_kind === "community_post"
                     ? "展开本次保存的社区发言"
@@ -1971,8 +1980,26 @@ export default function ReaderApp() {
                           community: "开发者社区",
                         }[s.role] || "公开来源") +
                         " · " +
-                        (s.kind === "releases" ? "开源版本" : "订阅来源")}
+                        ({
+                          releases: "开源版本",
+                          publisher_index: "官网更新",
+                          changelog: "更新日志",
+                          document: "官方文档更新",
+                          markdown: "更新记录",
+                          hub_models: "模型目录与模型卡",
+                          modelscope_models: "模型目录",
+                          arxiv: "论文摘要",
+                          daily_papers: "论文发现",
+                          arena: "文本偏好榜单",
+                          swebench: "编程评测结果",
+                        }[s.kind] || "订阅来源")}
                   </small>
+                  {s.kind !== "search" && (
+                    <small>
+                      {s.priority === 0 ? "核心来源" : "补充来源"}
+                      {s.description ? " · " + s.description : ""}
+                    </small>
+                  )}
                 </div>
                 <div>
                   <span className={"r-source-state " + s.state.status}>
@@ -1989,6 +2016,15 @@ export default function ReaderApp() {
                       ? "最近成功 " + when(s.state.last_success)
                       : "尚无成功记录"}
                   </small>
+                  {s.state.count !== undefined && s.state.status !== "error" && (
+                    <small>
+                      采集得到 {s.state.count} 条
+                      {s.state.with_text !== undefined
+                        ? `，其中 ${s.state.with_text} 条带文本节选`
+                        : ""}
+                    </small>
+                  )}
+                  {s.state.http_status && <small>HTTP {s.state.http_status}</small>}
                 </div>
               </article>
             ))}

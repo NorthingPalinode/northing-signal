@@ -1,10 +1,12 @@
 # CFAW News
 
-面向 AI 读者的本机个人情报空间：从公开材料中整理值得知道的变化，减少重复报道、无关消息和只有标题的噪声，并保留原始出处与判断边界。
+面向重度 AI 读者的本机事件追踪阅读器：聚合发布、文中测试与更正，帮助你查看具体变化、原始出处，以及宣称的依据与边界。
 
 [![starter-checks](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml)
 
 当前采用独立的 Python / React 内容引擎。默认入口已从旧目标工作台切换到阅读器；旧个人数据库与历史研究材料保留，未自动迁移或删除。
+
+当前版本已接入 **45 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
 
 ## 可以做什么
 
@@ -21,7 +23,18 @@
 
 ## 信息来源
 
-固定订阅池目前包含 12 个官方、研究、媒体、技术作者和开源发布来源，配置见 [briefing_sources.json](data/briefing_sources.json)。另有九类可选检索入口：
+固定来源池已从 12 个扩展为 45 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
+
+| 固定来源类型 | 数量 | 代表来源与材料 |
+|---|---:|---|
+| 官网发布与更新日志 | 8 | Anthropic、DeepSeek、Kimi、MiniMax、ByteDance Seed、Meta、xAI、Mistral |
+| 开源版本 | 8 | vLLM、SGLang、llama.cpp、Ollama、Transformers、LangGraph、Kimi Code、Claude Code |
+| 模型目录与模型卡 | 10 | 九个 Hugging Face 官方组织，以及 ModelScope 的 Qwen 公开目录 |
+| 论文发现 | 2 | arXiv 分类查询、Hugging Face Daily Papers |
+| 评测数据与项目更新 | 3 | Arena 文本榜、SWE-bench Verified；LiveBench 当前仅更新记录 |
+| RSS / Atom | 14 | OpenAI、Google DeepMind、研究机构、Simon Willison、Interconnects、Latent Space、量子位等 |
+
+这些是入口数量，不等于独立发布方数，也不代表完整或持续覆盖。另有以下九类主动检索入口，与固定池另计：
 
 | 检索入口 | 覆盖与边界 |
 |---|---|
@@ -36,6 +49,10 @@
 | 小红书 | 公开网页索引中的笔记线索，尚未接入站内笔记搜索或登录正文 |
 
 三家社交平台当前默认采用无需账号或原生 API 授权的公开检索。只有链接或摘要的条目标为“搜索线索 · 正文待获取”，不会生成仿佛已看过全文或视频的事实卡片。视频、音频、图片内容理解尚未实现；公开索引不保证全量、实时覆盖。来源状态会分别显示成功、无结果和失败，单个来源故障不阻断其他来源。
+
+官网列表先收录为线索，补读原文后再整理；固定模型目录每批最多读取一份公开模型卡，不获取权重或受限文件。Arena 文本榜与 SWE-bench 结果以“公开榜单数据”展示有界节选，保留来源条件和核验状态，不代表本项目复测。LiveBench 当前仅接入更新记录；ModelScope 当前仅接入 Qwen 公开目录元数据。
+
+X 原生检索需要自己的应用授权；Artificial Analysis 数据 API 与 OpenReview 尚未接入默认采集。部分厂商官网独有内容、受限全文及当前完整评测榜单仍有缺口，详见来源说明。接口可用性以本机实际检查为准；公开 GET 支持当前环境的 HTTPS 代理，并保留公网地址、TLS 与响应大小边界。
 
 ## 启动
 
@@ -109,6 +126,8 @@ npm run build
 默认 pytest 覆盖当前内容引擎和共用公网读取边界。CI 使用同一范围，并运行既有前端纯函数检查与构建；合成测试不是实网模型或真人阅读效果证明。历史研究测试保留显式入口 `pytest tests` 或 `scripts/verify.ps1 -Legacy`，不作为新阅读器的默认运行门槛，也不重签旧封存报告。
 
 主要入口是 `backend/cfaw_news/briefing/` 与 `frontend/src/ReaderApp.tsx`。实现、真实开发检查与限制见 [内容引擎说明](docs/CONTENT_ENGINE.md)；范围和后续方向见 [开发计划](docs/plans/AI_INFORMATION_QUALITY_IMPLEMENTATION_PLAN.md)。
+
+下一轮重点是外部重要事件漏报观察、主张级测试归属、持续事件与回访增量，以及对象快捷关注。它们仍有待实施或验证的部分，不能把计划或一次来源连通检查当作两周覆盖效果与用户收益。
 
 ## 数据与当前限制
 

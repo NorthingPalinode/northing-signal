@@ -57,7 +57,7 @@ class Material(Contract):
     text: str = Field(max_length=16000)
     published_at: str | None = None
     captured_at: str = Field(default_factory=now)
-    content_kind: Literal["feed_excerpt", "release_notes", "publisher_excerpt", "search_excerpt", "index_abstract", "catalog_metadata", "community_post"] = "feed_excerpt"
+    content_kind: Literal["feed_excerpt", "release_notes", "publisher_excerpt", "search_excerpt", "index_abstract", "catalog_metadata", "community_post", "benchmark_snapshot"] = "feed_excerpt"
     discovery_url: str | None = None
     origin: Literal["real", "synthetic"] = "real"
 

@@ -51,7 +51,10 @@ class ContentService:
     def source_list(self):
         states = self.store.source_states()
         result = [{**{k: s[k] for k in ("id", "name", "role", "url", "kind")},
-                   "state": states.get(s["id"], {"status": "not_checked"})} for s in self.sources]
+                   "url": s.get("original_url", s["url"]),
+                   "description": s.get("description", ""), "priority": s.get("priority", 1),
+                   "state": states.get(s["id"], {"status": "not_checked"})}
+                  for s in sorted(self.sources, key=lambda s: s.get("priority", 1))]
         for key, meta in SEARCH_SOURCES.items():
             source_id = key + "-discovery"
             state = states.get(source_id, {"status": "not_checked"})

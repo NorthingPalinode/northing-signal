@@ -127,7 +127,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None):
             "content_type": a.content_type, "action": a.action, "evidence": a.evidence,
             "content_kind": material.content_kind,
             "claims": [c.model_dump() for c in a.claims], "conditions": a.conditions,
-            "limitations": list(dict.fromkeys([*a.limitations, "依据研究索引收录的摘要整理，未核对论文全文。" if material.content_kind == "index_abstract" else "来源为社区发言，不代表官方或独立验证。" if material.content_kind == "community_post" else "依据已取得的原文节选整理，可展开核对。"])),
+            "limitations": list(dict.fromkeys([*a.limitations, "依据来源公开榜单的数据节选整理，需保留方法、提交者与核验状态；未由本项目复测。" if material.content_kind == "benchmark_snapshot" else "依据研究索引收录的摘要整理，未核对论文全文。" if material.content_kind == "index_abstract" else "来源为社区发言，不代表官方或独立验证。" if material.content_kind == "community_post" else "依据已取得的原文节选整理，可展开核对。"])),
             "source": material.source_name, "source_role": material.source_role, "url": material.url,
             "source_id": material.source_id,
             "published_at": material.published_at, "captured_at": material.captured_at,
