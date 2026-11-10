@@ -4,7 +4,7 @@
 
 [![starter-checks](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml)
 
-当前采用独立的 Python / React 内容引擎。默认入口已从旧目标工作台切换到阅读器；旧个人数据库与历史研究材料保留，未自动迁移或删除。
+当前采用独立的 Python / React 内容引擎。旧版目标工作台与 G1–G4 研究材料已从主分支移除，保存在 [`archive/research-g1-g4`](https://github.com/V-Giotto/cfaw-news/tree/archive/research-g1-g4) 分支；旧个人数据库未自动迁移或删除，可以用 `scripts/export_legacy.py` 导出。
 
 当前版本已接入 **45 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
 
@@ -123,7 +123,7 @@ npm test
 npm run build
 ```
 
-默认 pytest 覆盖当前内容引擎和共用公网读取边界。CI 使用同一范围，并运行既有前端纯函数检查与构建；合成测试不是实网模型或真人阅读效果证明。历史研究测试保留显式入口 `pytest tests` 或 `scripts/verify.ps1 -Legacy`，不作为新阅读器的默认运行门槛，也不重签旧封存报告。
+默认 pytest 覆盖内容引擎和公网读取边界（`tests_reader/`）。CI 使用同一范围，并运行前端测试与构建；合成测试不是实网模型或真人阅读效果证明。
 
 主要入口是 `backend/cfaw_news/briefing/` 与 `frontend/src/ReaderApp.tsx`。实现、真实开发检查与限制见 [内容引擎说明](docs/CONTENT_ENGINE.md)；范围和后续方向见 [开发计划](docs/plans/AI_INFORMATION_QUALITY_IMPLEMENTATION_PLAN.md)。
 
@@ -132,10 +132,10 @@ npm run build
 ## 数据与当前限制
 
 - 当前是本机单用户开发版，不提供生产鉴权、公网部署或多用户隔离。
-- 数据默认保存在 `.local/briefing-v2.db`；旧个人库与 `data/archive/articles.json` 的迁移出处保留。
+- 数据默认保存在 `.local/briefing-v2.db`；旧个人库（`.local/cfaw-news.db`）不自动迁移，可用 `python scripts/export_legacy.py` 只读导出为 JSON Lines。`data/archive/articles.json` 等迁移出处保留。
 - 事件聚合使用具体事件框架和原文指纹；跨语言去重、长尾召回与摘要语义仍可能出错，尚未实现向量检索。
 - 真实材料、AI 开发标签、合成样例与用户反馈分开记录；小样本结果不等于独立研究结论或普遍准确率。
 - `.env`、`.local/`、`.tmp/`、虚拟环境、依赖、生成的 `frontend/dist/` 和 `dev-diaries/` 均不提交 Git。开发日记与私人数据永远仅保留在本地。
 - 能抓到公开内容不代表拥有全文再分发权限；当前保存必要节选和出处，没有对外全文发布服务。
 
-代码许可：[Apache-2.0](LICENSE)；第三方资产见 [NOTICE](NOTICE)。旧 G1–G4 文档保留其原始研究与验收含义，不作为新内容引擎已实现能力或质量提升的证明。
+代码许可：[Apache-2.0](LICENSE)；第三方资产见 [NOTICE](NOTICE)。归档分支中的 G1–G4 文档保留其原始研究与验收含义，不作为新内容引擎已实现能力或质量提升的证明。

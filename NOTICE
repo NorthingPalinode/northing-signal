@@ -15,10 +15,5 @@ publishers. Apache licensing of application code does not grant ownership of
 news content. Archive statements and verification dates are inherited metadata,
 not a claim that this starter reverified those sources or current conditions.
 
-React, Vite, FastAPI, SQLAlchemy and all other dependencies retain their own
+React, Vite, FastAPI and all other dependencies retain their own
 licenses. No private runtime data, accounts or API credentials were migrated.
-
-The GitHub source brand mark is from primer/octicons, mark-github-16.svg,
-Copyright (c) 2026 GitHub Inc., under the MIT license. The asset source and
-full license are in frontend/public/source-brands/LICENSE.github-octicons.txt.
-It identifies the publisher and is not an article photograph or endorsement.
