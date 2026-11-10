@@ -28,12 +28,42 @@ def occurrence_key(value):
     return normalize(value)
 
 
+def frame_key(assessment):
+    """The projection's event name for a judgment, or None when the frame is too vague.
+
+    The model's event key is a proposal. Subject AND concrete object must also agree.
+    Empty/ambiguous frames stay separate; names of companies alone never merge events.
+    """
+    frame = [normalize(assessment.subject), normalize(assessment.object), occurrence_key(assessment.event_key)]
+    return digest(frame)[:24] if all(frame) and len(frame[1]) >= 3 else None
+
+
+def text_key(material):
+    """Reposts of one long original text belong to one event whatever the model called it."""
+    original = normalize(material.text)
+    return digest(original) if len(original) >= 120 else None
+
+
+def occurrences(materials, judgments, *, as_of=None):
+    """(material, assessment) for materials the projection puts into events, in its order."""
+    clock = stamp(as_of) if as_of else datetime.now(timezone.utc)
+    for material in sorted(materials, key=lambda m: (m.captured_at, m.id)):
+        row = judgments.get(material.version)
+        if not row or stamp(material.captured_at) > clock:
+            continue
+        assessment = assessment_of(row)
+        published = stamp(material.published_at)
+        if assessment.relevance == "ai" and not (published and published > clock + timedelta(hours=24)):
+            yield material, assessment
+
+
 def active_actions(interactions):
     retracted = {r["retracts"] for r in interactions if r["kind"] == "retract"}
     return [r for r in interactions if r["request_id"] not in retracted and r["kind"] != "retract"]
 
 
-def project(materials, judgments, preferences, interactions=(), *, as_of=None):
+def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None):
+    """membership: material id -> stored event id. Without it, events are derived as before."""
     clock = stamp(as_of) if as_of else datetime.now(timezone.utc)
     groups, archive, identical = defaultdict(list), [], {}
     for material in sorted(materials, key=lambda m: (m.captured_at, m.id)):
@@ -58,13 +88,15 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None):
         archive.append(brief)
         if assessment.relevance != "ai":
             continue
-        # The model's event key is a proposal. Subject AND concrete object must also agree.
-        # Empty/ambiguous frames stay separate; names of companies alone never merge events.
-        frame = [normalize(assessment.subject), normalize(assessment.object), occurrence_key(assessment.event_key)]
-        group = digest(frame)[:24] if all(frame) and len(frame[1]) >= 3 else material.id
-        original = normalize(material.text)
-        if len(original) >= 120:
-            group = identical.setdefault(digest(original), group)
+        text = text_key(material)
+        if membership and material.id in membership:
+            group = membership[material.id]
+            if text:
+                identical.setdefault(text, group)
+        else:
+            group = frame_key(assessment) or material.id
+            if text:
+                group = identical.setdefault(text, group)
         groups[group].append((material, assessment, row))
 
     actions = active_actions(interactions)

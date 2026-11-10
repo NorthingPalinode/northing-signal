@@ -128,3 +128,12 @@ export function queueLabel(run: Run) {
       ? `搜索「${run.query}」`
       : "更新情报";
 }
+
+/** Events a reader may fold this one into: same topic, newest first. */
+export function mergeCandidates(view: View | null, story: Story, limit = 30) {
+  const time = (e: Story) => Date.parse(e.published_at || e.captured_at) || 0;
+  return (view?.events || [])
+    .filter((e) => e.id !== story.id && e.topic === story.topic)
+    .sort((a, b) => time(b) - time(a))
+    .slice(0, limit);
+}

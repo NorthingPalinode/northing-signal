@@ -29,6 +29,7 @@ flowchart LR
 | `understand.py` | 调用兼容 Chat Completions 接口整理素材；校验引文、数字与结构；记录用量与预算 |
 | `intent.py` | 自然语言描述 → 可核对的追踪方案 → 方案内的相关性判断 |
 | `engine.py` | 纯函数：事件聚合、阅读排序、简报选取；不依赖 HTTP 或数据库 |
+| `events.py` | 纯函数：新材料归入哪个事件（原文相同、框架相同、保守的模糊匹配）与合并别名解析 |
 | `tracking.py` | 关注话题的成员与未读版本计算 |
 | `models.py`、`settings.py` | 数据契约与配置 |
 | `__main__.py` | 命令行：离线检查、导出、重查与有界采集 |
@@ -55,6 +56,7 @@ flowchart LR
 - **快照**：只保存当时简报的 focus/radar 事件，不保存整个资料库。保留最近 60 份，以及 90 天内的全部快照。
 - **线程**：路由和后台任务中的大块读取与投影计算放在线程中执行；`Store` 用一把锁串行访问 SQLite。
 - **规则代**：判断表的主键是 `(version, policy, epoch)`。`judgments()` 对每个版本取 epoch 最高、写入最晚的一条。启动时 `adopt_policy()` 把当前提示词在迁移前写下的判断认领为当前规则代；其他提示词版本写下的判断保持 epoch 0，不显示。`POLICY_EPOCH` 只在判断结论应当失效时才提升（`models.py`）。
+- **事件归属**（schema 4）：`event_members` 按材料 id 记录所属事件，分配后不再自动移动；`event_aliases` 记录合并前的旧 ID，`event_changes` 追加记录读者的拆分与合并。首次启动时按原有投影规则回填（`meta.events_backfilled`），保证事件 ID 不变。`project()` 接收归属后按它分组，未分配的材料仍按原规则计算。阅读操作按版本所属的材料归到当前事件。
 - **失败退避**：`judgment_failures` 按 `(version, epoch)` 记录尝试次数、原因和下次重试时间（1 小时、6 小时，第三次后停止；引文/数字不符从第二级开始）。判断成功或调用 `/materials/{version}/retry` 后清除记录。
 
 ## 任务队列

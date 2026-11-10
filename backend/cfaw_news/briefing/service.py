@@ -9,9 +9,10 @@ from uuid import uuid4
 
 from .collect import collect, enrich
 from .discover import discover
-from .engine import active_actions, project, stamp
+from .engine import active_actions, frame_key, occurrences, project, stamp, text_key
+from .events import assign, frame_of, resolve
 from .intent import IntentEngine, recall_candidates
-from .models import POLICY_EPOCH, Preferences, day_start, now
+from .models import POLICY_EPOCH, Preferences, assessment_of, day_start, digest, now
 from .search_sources import SEARCH_SOURCES, source_access
 from .tracking import matches, project_follows
 from .understand import POLICY_HASH, Analyzer, has_material
@@ -38,7 +39,7 @@ class ContentService:
         self.intent = IntentEngine(self.analyzer, store)
         store.adopt_policy(POLICY_HASH)
         self._projection = (None, 0, None)
-        self._event_index = (None, 0, None)
+        self._assigned = None  # content revision whose materials all have events
 
     def projection(self):
         """Events, saved events and follows: recomputed only after stored data changes.
@@ -46,16 +47,19 @@ class ContentService:
         Revisions cover every table the projection reads; the age limit keeps time-based
         ranking (recency decay, the 30-day window) from going stale on an idle database.
         """
+        self.assign_events()
         revision = self.store.revision()
         cached_revision, cached_at, cached = self._projection
         if cached_revision == revision and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
             return cached
         materials, judgments = self.store.materials(), self.store.judgments()
-        preferences, interactions = self.store.preferences(), self.store.interactions()
-        value = project(materials, judgments, preferences, interactions)
+        preferences = self.store.preferences()
+        membership = self.membership()
+        interactions = self.attribute(self.store.interactions(), membership)
+        value = project(materials, judgments, preferences, interactions, membership=membership)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
         saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
-                             interactions)
+                             interactions, membership=membership)
         value["saved_events"] = [e for e in saved_view["events"] if e["saved"]]
         follows = self.store.follows()
         assessments = {f["plan_hash"]: self.store.intent_assessments(f["plan_hash"])
@@ -83,33 +87,108 @@ class ContentService:
                      last_visit=self.store.last_visit())
         return value
 
-    def event_versions(self):
-        """event id -> versions a reader action may name; what view() would show, without ranking.
+    def assign_events(self):
+        """Give newly judged materials a lasting event; the first run adopts the old grouping.
 
-        Membership depends on content and saved items only, so the frequent "shown"/"opened"
-        actions do not force a full projection of the briefing.
+        Returns the content revision at which every material has its event.
         """
-        actions = [a for a in active_actions(self.store.interactions(("saved", "retract")))
-                   if a["kind"] == "saved"]
-        key = (self.store.revision()[0], tuple(a["request_id"] for a in actions))
-        cached_key, cached_at, cached = self._event_index
-        if cached_key == key and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
-            return cached
-        judgments, preferences = self.store.judgments(), Preferences()
-        index = {e["id"]: {t["version"] for t in e["timeline"]}
-                 for e in project(self.store.materials(), judgments, preferences)["events"]}
-        saved = self.store.materials_by_versions({a["version"] for a in actions})
-        for event in project(saved, judgments, preferences, actions)["events"]:
-            # view() looks events up in events + saved_events and takes the first match.
-            if event["saved"] and event["id"] not in index:
-                index[event["id"]] = {t["version"] for t in event["timeline"]}
-        self._event_index = (key, time.monotonic(), index)
-        return index
+        revision = self.store.revision()[0]
+        if revision == self._assigned:
+            return revision
+        materials, judgments = self.store.materials(), self.store.judgments()
+        found = list(occurrences(materials, judgments))
+        if not self.store.flag("events_backfilled"):
+            # Same grouping the projection computed until now: event ids and actions stay valid.
+            version_ids = {m.version: m.id for m in materials}
+            first = {}
+            for material, assessment in found:
+                first.setdefault(material.id, (material, assessment))
+            rows, created = [], {}
+            for event in project(materials, judgments, Preferences())["events"]:
+                ids = [version_ids[t["version"]] for t in event["timeline"]]
+                rows += [(material_id, event["id"], "migrated", None) for material_id in ids]
+                created[event["id"]] = frame_of(*min((first[i] for i in ids),
+                                                      key=lambda row: (row[0].captured_at, row[0].id)))
+            self.store.assign_events(rows, created, backfill=True)
+        members, live, aliases = self.store.event_state()
+        texts = {}
+        for material, _ in found:
+            if material.id in members and (key := text_key(material)):
+                texts.setdefault(key, resolve(members[material.id], aliases))
+        rows, created = assign(found, dict(members), dict(live), aliases, texts)
+        if rows:
+            self.store.assign_events(rows, created)
+        self._assigned = self.store.revision()[0]
+        return self._assigned
+
+    def membership(self, revision=None):
+        members, _, aliases = self.store.event_state(revision)
+        if not aliases:
+            return members  # nothing merged: stored ids are current (read-only use)
+        return {material: resolve(event, aliases) for material, event in members.items()}
+
+    def attribute(self, interactions, membership):
+        """Credit each action to the event its version's material belongs to now (splits, merges)."""
+        version_ids = self.store.version_ids()
+        return [{**a, "event_id": membership.get(version_ids.get(a["version"]), a["event_id"])}
+                for a in interactions]
 
     def record_interaction(self, body):
-        if body.kind != "retract" and body.version not in self.event_versions().get(body.event_id, ()):
-            raise LookupError("内容版本不存在，请重新读取")
+        if body.kind != "retract":
+            revision = self.assign_events()  # read once: this runs for every card shown
+            if self.event_of(body.version, revision) != self.resolve(body.event_id, revision):
+                raise LookupError("内容版本不存在，请重新读取")
         return self.store.interact(body)
+
+    def resolve(self, event_id, revision=None):
+        return resolve(event_id, self.store.event_state(revision)[2])
+
+    def event_of(self, version, revision=None):
+        """The event a material version is shown under, or None when it is not in any event."""
+        if revision is None:
+            revision = self.assign_events()
+        material_id = self.store.version_ids(revision).get(version)
+        if material_id is None:
+            return None
+        event = self.membership(revision).get(material_id)
+        if event:
+            return event
+        # Not assigned (e.g. a saved revision whose newest text is not judged as AI news):
+        # the projection names it from its own judgment, as before persistence.
+        judgment = self.store.judgment(version)
+        if not judgment or judgment.get("relevance") != "ai":
+            return None
+        return frame_key(assessment_of(judgment)) or material_id
+
+    def split_event(self, event_id, version):
+        """Move one material (and its later revisions) out of an event into its own."""
+        self.assign_events()
+        event, material_id = self.resolve(event_id), self.store.version_ids().get(version)
+        membership = self.membership()
+        if material_id is None or membership.get(material_id) != event:
+            raise LookupError("这条报道不在该事件中，请重新读取")
+        if sum(e == event for e in membership.values()) < 2:
+            raise ValueError("事件只剩这一条报道，无法再拆分")
+        target = "split-" + digest([event, material_id, now()])[:18]
+        judgment = self.store.judgment(version)
+        material = self.store.material(version)
+        frame = frame_of(material, assessment_of(judgment)) if judgment else {}
+        self.store.regroup({"kind": "split", "event": event, "material": material_id, "new_event": target},
+                           [material_id], target, frame=frame)
+        return target
+
+    def merge_events(self, source, target):
+        """Fold one event into another; the old id keeps resolving to the merged event."""
+        self.assign_events()
+        source, target = self.resolve(source), self.resolve(target)
+        _, live, _ = self.store.event_state()
+        if source not in live or target not in live:
+            raise LookupError("事件不存在，请重新读取")
+        if source == target:
+            raise ValueError("不能把事件合并到它自己")
+        moving = [m for m, e in self.membership().items() if e == source]
+        self.store.regroup({"kind": "merge", "event": source, "into": target, "materials": moving},
+                           moving, target, alias=source)
 
     def snapshot_view(self):
         """What a past briefing needs to be re-read: its ranked events, not the whole library."""
