@@ -7,6 +7,7 @@
 - Keep domain rules independent from HTTP/UI: immutable material revisions, append-only reader actions, no late publication after cancellation, explicit confirmation before tracking starts.
 - `baseline` mode does not call a model. Never present fixture or mocked results as live-model validation, and never present repeated AI passes as independent or human validation.
 - Judgments are keyed by `POLICY_EPOCH` (`briefing/models.py`), not by the prompt hash. Rewording the prompt keeps existing judgments; bump the epoch only when earlier conclusions should be re-judged, and say so in the change.
+- Event membership is persistent (`event_members`): never re-derive or rewrite existing groupings; only a reader's split/merge moves materials. Fuzzy matching stays conservative (exact normalised subject, versions and product words) — a wrong merge hides news.
 - Preserve `data/archive/articles.json`, `data/sources.json` and `docs/provenance/` (migration provenance). Publisher statements, reported tests, opinions, search excerpts and model explanations are different evidence types.
 - Keep credentials and local user data out of Git. Do not read or copy another project's credentials.
 - Development diaries belong in `dev-diaries/` and must remain local. Never stage, force-add, commit, push, or upload that directory or its contents; preserve its root `.gitignore` rule.

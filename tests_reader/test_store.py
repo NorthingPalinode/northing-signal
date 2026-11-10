@@ -92,22 +92,23 @@ def test_projection_is_reused_until_stored_data_changes(tmp_path, monkeypatch):
     calls = []
     original = service_module.project
     monkeypatch.setattr(service_module, "project", lambda *a, **k: calls.append(1) or original(*a, **k))
-    first = service.view()
-    computed = len(calls)
-    assert computed and service.view()["events"] == first["events"]
-    assert len(calls) == computed
+    first = service.view()  # also adopts the existing grouping once (event backfill)
+    started = len(calls)
+    assert started and service.view()["events"] == first["events"]
+    assert len(calls) == started
     event = first["events"][0]
     store.interact(Interaction(request_id="useful-0001", event_id=event["id"],
                                version=event["version"], kind="useful"))
     assert service.view()["events"][0]["actions"][0]["kind"] == "useful"
-    assert len(calls) == 2 * computed
+    per_projection = len(calls) - started
+    assert per_projection
     # Recency ranking must not freeze on an idle database.
     monkeypatch.setattr(service_module, "PROJECTION_MAX_AGE", 0)
     service.view()
-    assert len(calls) == 3 * computed
+    assert len(calls) == started + 2 * per_projection
 
 
-def test_interaction_check_matches_visible_and_saved_versions(tmp_path):
+def test_interaction_check_follows_the_material_event(tmp_path):
     store = Store(tmp_path / "reader.db")
     old = material(text="Atlas 2 is available. Free for research.")
     store.capture(old)
@@ -130,8 +131,10 @@ def test_interaction_check_matches_visible_and_saved_versions(tmp_path):
     assert service.view()["saved_events"][0]["version"] == old.version
     assert act("opened-0001", old.version, "opened")
     assert act("retract-0001", old.version, "retract", retracts="saved-0001")
+    # The material keeps its event, so its older revision stays addressable after unsaving.
+    assert act("opened-0002", old.version, "opened")
     with pytest.raises(LookupError):
-        act("opened-0002", old.version, "opened")
+        act("opened-0003", old.version, event_id="another-event")
 
 
 def test_snapshots_keep_recent_briefings_and_only_their_events(tmp_path):

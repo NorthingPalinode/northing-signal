@@ -5,6 +5,7 @@ import {
   evidence,
   feedbackNotice,
   followSeed,
+  mergeCandidates,
   pageFromHash,
   queueLabel,
   sections,
@@ -107,4 +108,17 @@ test("queued jobs and failed materials have readable labels", () => {
   assert.equal(queueLabel(run({ kind: "following", follow_name: "本地智能体" })), "追踪「本地智能体」");
   assert.equal(statusLabel.failed, "整理失败");
   assert.match(statusLabel.retrying, /稍后重试/);
+});
+
+test("merge candidates are other events of the same topic, newest first", () => {
+  const events = [
+    story("old", { published_at: "2026-10-01T00:00:00Z" }),
+    story("self"),
+    story("new", { published_at: "2026-11-01T00:00:00Z" }),
+    story("other-topic", { topic: "agents" }),
+  ];
+  const value = view(events);
+  assert.deepEqual(mergeCandidates(value, events[1]).map((e) => e.id), ["new", "old"]);
+  assert.deepEqual(mergeCandidates(value, events[1], 1).map((e) => e.id), ["new"]);
+  assert.deepEqual(mergeCandidates(null, events[1]), []);
 });

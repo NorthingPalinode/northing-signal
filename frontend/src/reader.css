@@ -2125,3 +2125,34 @@ button.r-primary:hover {
   accent-color: #6554bd;
   margin: 0;
 }
+
+.r-split {
+  margin-left: 10px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.r-split:hover {
+  color: var(--accent);
+}
+.r-merge > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.r-merge select {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.r-merge button {
+  font-size: 12px;
+  color: var(--accent);
+}
+.r-merge button:disabled {
+  color: var(--muted);
+}

@@ -148,6 +148,14 @@ class RefreshRequest(Contract):
     analyze_limit: int = Field(default=24, ge=0, le=120)
 
 
+class SplitRequest(Contract):
+    version: str = Field(min_length=1, max_length=100)
+
+
+class MergeRequest(Contract):
+    into: str = Field(min_length=1, max_length=100)
+
+
 class CancelRequest(Contract):
     id: str | None = Field(default=None, max_length=64)
 

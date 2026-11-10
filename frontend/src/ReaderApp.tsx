@@ -10,6 +10,7 @@ import {
   evidence,
   feedbackNotice,
   followSeed,
+  mergeCandidates,
   pageFromHash,
   queueLabel,
   sections,
@@ -214,6 +215,7 @@ export default function ReaderApp() {
     captured_at: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mergeInto, setMergeInto] = useState("");
   const [history, setHistory] = useState<
     { id: string; created_at: string }[] | null
   >(null);
@@ -375,7 +377,24 @@ export default function ReaderApp() {
       setError((e as Error).message);
     }
   }
+  /** Split one report out of an event, or fold the event into another. */
+  async function regroup(story: Story, path: string, body: object, done: string) {
+    try {
+      setView(
+        await request<View>(`/events/${story.id}/${path}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+      );
+      setDetail(null);
+      setMergeInto("");
+      setNotice(done);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   function open(story: Story) {
+    setMergeInto("");
     setDetail(story);
     setRaw(null);
     if (!historical)
@@ -1610,9 +1629,59 @@ export default function ReaderApp() {
                       <a href={t.url} target="_blank" rel="noreferrer">
                         {t.title}
                       </a>
-                      <p>{t.source}</p>
+                      <p>
+                        {t.source}
+                        {!historical && (
+                          <button
+                            className="r-split"
+                            aria-label={"不是同一件事：" + t.title}
+                            onClick={() =>
+                              void regroup(
+                                detail,
+                                "split",
+                                { version: t.version },
+                                "已拆分为单独的事件，之后不会自动并回。",
+                              )
+                            }
+                          >
+                            不是同一件事
+                          </button>
+                        )}
+                      </p>
                     </div>
                   ))}
+                </div>
+              </section>
+            )}
+            {!historical && mergeCandidates(view, detail).length > 0 && (
+              <section className="r-merge">
+                <h3>与另一件事重复？</h3>
+                <div>
+                  <select
+                    aria-label="选择要合并到的事件"
+                    value={mergeInto}
+                    onChange={(e) => setMergeInto(e.target.value)}
+                  >
+                    <option value="">选择同一方向下的事件…</option>
+                    {mergeCandidates(view, detail).map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {when(e.published_at)} · {e.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={!mergeInto}
+                    onClick={() =>
+                      void regroup(
+                        detail,
+                        "merge",
+                        { into: mergeInto },
+                        "已合并，收藏和反馈随报道一起保留。",
+                      )
+                    }
+                  >
+                    合并
+                  </button>
                 </div>
               </section>
             )}

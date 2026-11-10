@@ -12,6 +12,7 @@ from .models import POLICY_EPOCH, Interaction, Material, Preferences, digest, no
 
 CONTENT_TABLES = ("materials", "judgments")  # judgment_failures joins in migration 3
 READER_TABLES = ("interactions", "preferences", "follows", "intent_assessments")
+EVENT_TABLES = ("events", "event_members", "event_aliases")  # count as content: they regroup the briefing
 
 
 def _revision_triggers(table, key):
@@ -76,6 +77,18 @@ MIGRATIONS = [
         PRIMARY KEY(version, epoch));
     """ + _revision_triggers("judgments", "content_revision")
         + "\n" + _revision_triggers("judgment_failures", "content_revision")),
+    # Persistent event membership. Rows are filled from the projection's own grouping on the
+    # first start (meta.events_backfilled), so existing event ids and reader actions keep matching.
+    (4, """
+    CREATE TABLE events (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE event_members (
+        material_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, method TEXT NOT NULL,
+        score REAL, created_at TEXT NOT NULL);
+    CREATE INDEX event_members_event ON event_members(event_id);
+    CREATE TABLE event_aliases (old_id TEXT PRIMARY KEY, new_id TEXT NOT NULL);
+    CREATE TABLE event_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
+    """ + "\n".join(_revision_triggers(t, "content_revision") for t in EVENT_TABLES)),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 SNAPSHOT_KEEP, SNAPSHOT_DAYS = 60, 90
@@ -92,6 +105,8 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self._materials = (None, [])
+        self._version_ids = (None, {})
+        self._event_state = (None, None)
         self.migrate()
 
     def migrate(self):
@@ -185,6 +200,12 @@ class Store:
                 FROM judgments WHERE epoch > 0) WHERE n=1""").fetchall()
         return {r["version"]: {**json.loads(r["data"]), "model": r["model"], "epoch": r["epoch"]} for r in rows}
 
+    def judgment(self, version):
+        with self.connection() as db:
+            row = db.execute("""SELECT data, model, epoch FROM judgments WHERE version=? AND epoch > 0
+                                ORDER BY epoch DESC, rowid DESC LIMIT 1""", (version,)).fetchone()
+        return {**json.loads(row["data"]), "model": row["model"], "epoch": row["epoch"]} if row else None
+
     def judge(self, version, policy, value, model, epoch=None):
         epoch = POLICY_EPOCH if epoch is None else epoch
         with self.connection() as db:
@@ -225,6 +246,60 @@ class Store:
         with self.connection() as db:
             return db.execute("DELETE FROM judgment_failures WHERE version=?", (version,)).rowcount > 0
 
+    def flag(self, key):
+        with self.connection() as db:
+            row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return bool(row and row["value"])
+
+    def version_ids(self, revision=None):
+        """Every stored material version -> its material id (older revisions included).
+
+        revision: a content revision the caller just read, to skip reading it again.
+        """
+        revision = self.revision()[0] if revision is None else revision
+        if self._version_ids[0] != revision:
+            with self.connection() as db:
+                self._version_ids = (revision, dict(db.execute("SELECT version, id FROM materials").fetchall()))
+        return self._version_ids[1]
+
+    def event_state(self, revision=None):
+        """(material id -> event id, live event id -> frame, merged id -> successor).
+
+        Read once per content revision; callers copy before changing anything.
+        """
+        revision = self.revision()[0] if revision is None else revision
+        if self._event_state[0] != revision:
+            with self.connection() as db:
+                members = dict(db.execute("SELECT material_id, event_id FROM event_members").fetchall())
+                events = {r["id"]: json.loads(r["data"]) for r in db.execute("SELECT id, data FROM events")}
+                aliases = dict(db.execute("SELECT old_id, new_id FROM event_aliases").fetchall())
+            self._event_state = (revision, (members, {k: v for k, v in events.items() if k not in aliases}, aliases))
+        return self._event_state[1]
+
+    def assign_events(self, rows, created, *, backfill=False):
+        """Add memberships (never moving an assigned material) and the events they create."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.executemany("INSERT OR IGNORE INTO events VALUES (?, ?, ?)",
+                           [(key, self.encoded(frame), now()) for key, frame in created.items()])
+            db.executemany("INSERT OR IGNORE INTO event_members VALUES (?, ?, ?, ?, ?)",
+                           [(material, event, method, score, now()) for material, event, method, score in rows])
+            if backfill:
+                db.execute("INSERT OR REPLACE INTO meta VALUES ('events_backfilled', 1)")
+
+    def regroup(self, change, material_ids, target, frame=None, alias=None):
+        """A reader's split or merge: move materials, optionally retire an id, and log it."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if frame is not None:
+                db.execute("INSERT INTO events VALUES (?, ?, ?)", (target, self.encoded(frame), now()))
+            db.executemany("UPDATE event_members SET event_id=?, method='manual', score=NULL WHERE material_id=?",
+                           [(target, material) for material in material_ids])
+            if alias:
+                db.execute("INSERT OR REPLACE INTO event_aliases VALUES (?, ?)", (alias, target))
+                db.execute("UPDATE event_aliases SET new_id=? WHERE new_id=?", (target, alias))
+            db.execute("INSERT INTO event_changes(data, created_at) VALUES (?, ?)", (self.encoded(change), now()))
+
     def source_state(self, source_id, value):
         with self.connection() as db:
             db.execute("INSERT OR REPLACE INTO source_states VALUES (?, ?)",
@@ -256,7 +331,8 @@ class Store:
             if value.kind == "retract":
                 target = db.execute("SELECT data FROM interactions WHERE id=?", (value.retracts,)).fetchone()
                 old = json.loads(target["data"]) if target else None
-                if (not old or old["event_id"] != value.event_id or old["version"] != value.version
+                # Matched by version, not event id: a split or merge may have renamed the event since.
+                if (not old or old["version"] != value.version
                         or old["kind"] in {"retract", "shown", "opened"}):
                     raise ValueError("找不到可撤回的操作")
             db.execute("INSERT INTO interactions VALUES (?, ?, ?, ?)",

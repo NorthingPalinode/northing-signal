@@ -18,8 +18,10 @@ from .models import (
     FollowState,
     Interaction,
     InterpretFollow,
+    MergeRequest,
     Preferences,
     RefreshRequest,
+    SplitRequest,
     VisitRequest,
 )
 from .service import ContentService
@@ -201,6 +203,27 @@ def create_app(settings=None, store=None):
             raise HTTPException(404, str(error)) from None
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
+
+    @app.post("/api/reader/events/{key}/split")
+    async def split_event(key: str, body: SplitRequest):
+        """A reader says one report is not the same occurrence; it becomes its own event."""
+        try:
+            await off_loop(service.split_event, key, body.version)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+        return await off_loop(service.view)
+
+    @app.post("/api/reader/events/{key}/merge")
+    async def merge_event(key: str, body: MergeRequest):
+        try:
+            await off_loop(service.merge_events, key, body.into)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+        return await off_loop(service.view)
 
     @app.post("/api/reader/materials/{version}/retry")
     async def retry_material(version: str):
