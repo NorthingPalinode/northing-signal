@@ -4,6 +4,7 @@ import hashlib
 import ipaddress
 import json
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -68,7 +69,13 @@ class Material(Contract):
 
     @property
     def version(self):
-        return digest([self.id, self.title, self.text, self.published_at, self.content_kind])
+        # Keyed by field values, so model_copy(update=...) never inherits a stale digest.
+        return material_version(self.id, self.title, self.text, self.published_at, self.content_kind)
+
+
+@lru_cache(maxsize=65536)
+def material_version(key, title, text, published_at, content_kind):
+    return digest([key, title, text, published_at, content_kind])
 
 
 class Claim(Contract):

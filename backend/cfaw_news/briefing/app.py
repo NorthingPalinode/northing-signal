@@ -1,5 +1,6 @@
 """Standalone local AI reader."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -60,22 +61,26 @@ def create_app(settings=None, store=None):
     async def health():
         return {"status": "ok", "version": __version__, "engine": "content-v1"}
 
+    # SQLite reads and the briefing projection are blocking; keep them off the event loop.
+    def off_loop(function, *args):
+        return asyncio.to_thread(function, *args)
+
     @app.get("/api/reader")
     async def reader():
-        return service.view()
+        return await off_loop(service.view)
 
     @app.post("/api/reader/visits")
     async def visit(body: VisitRequest):
-        store.visit(body.request_id)
+        await off_loop(store.visit, body.request_id)
         return {"recorded": True}
 
     @app.get("/api/reader/snapshots")
     async def snapshots():
-        return store.snapshots()
+        return await off_loop(store.snapshots)
 
     @app.get("/api/reader/snapshots/{key}")
     async def snapshot(key: str):
-        result = store.snapshots(key)
+        result = await off_loop(store.snapshots, key)
         if result is None:
             raise HTTPException(404, "这份简报不存在")
         return result
@@ -110,8 +115,8 @@ def create_app(settings=None, store=None):
 
     @app.put("/api/reader/preferences")
     async def preferences(body: Preferences):
-        store.save_preferences(body)
-        return service.view()
+        await off_loop(store.save_preferences, body)
+        return await off_loop(service.view)
 
     @app.post("/api/reader/follows/interpret")
     async def interpret_follow(body: InterpretFollow):
@@ -135,7 +140,7 @@ def create_app(settings=None, store=None):
                 store.update_follow(row["id"], last_checked=None, last_status="not_checked", last_errors=[])
             if changed and row["active"] and not (service.task and not service.task.done()):
                 service.start_follow(row["id"])
-            return {**service.view(), "confirmed_follow_id": row["id"]}
+            return {**await off_loop(service.view), "confirmed_follow_id": row["id"]}
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
@@ -148,7 +153,7 @@ def create_app(settings=None, store=None):
             store.update_follow(key, active=body.active)
             if not body.active and service.run and service.run.get("follow_id") == key:
                 await service.cancel()
-            return service.view()
+            return await off_loop(service.view)
         except ValueError as error:
             raise HTTPException(404, str(error)) from None
 
@@ -158,7 +163,7 @@ def create_app(settings=None, store=None):
             if service.run and service.run.get("follow_id") == key:
                 await service.cancel()
             store.update_follow(key, active=False, archived=True)
-            return service.view()
+            return await off_loop(service.view)
         except ValueError as error:
             raise HTTPException(404, str(error)) from None
 
@@ -171,28 +176,26 @@ def create_app(settings=None, store=None):
 
     @app.post("/api/reader/follows/{key}/seen")
     async def seen_follow(key: str):
-        item = next((f for f in service.view()["follows"] if f["id"] == key), None)
+        view = await off_loop(service.view)
+        item = next((f for f in view["follows"] if f["id"] == key), None)
         if not item:
             raise HTTPException(404, "这个关注话题不存在")
         store.update_follow(key, seen_versions=item["versions"])
-        return service.view()
+        return await off_loop(service.view)
 
     @app.post("/api/reader/interactions")
     async def interact(body: Interaction):
-        view = service.view()
-        events = view["events"] + view["saved_events"]
-        event = next((e for e in events if e["id"] == body.event_id), None)
-        if body.kind != "retract" and (not event or body.version not in {t["version"] for t in event["timeline"]}):
-            raise HTTPException(404, "内容版本不存在，请重新读取")
         try:
-            created = store.interact(body)
+            created = await off_loop(service.record_interaction, body)
             return {"created": created}
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
     @app.get("/api/reader/materials/{version}")
     async def material(version: str):
-        row = store.material(version)
+        row = await off_loop(store.material, version)
         if not row:
             raise HTTPException(404, "原始材料不存在")
         return row.model_dump()

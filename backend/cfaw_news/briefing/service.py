@@ -10,10 +10,12 @@ from .collect import collect, enrich
 from .discover import discover
 from .engine import active_actions, project, stamp
 from .intent import IntentEngine, recall_candidates
-from .models import now
+from .models import Preferences, now
 from .search_sources import SEARCH_SOURCES, source_access
 from .tracking import matches, project_follows
 from .understand import POLICY_HASH, Analyzer, has_material
+
+PROJECTION_MAX_AGE = 600
 
 
 class ContentService:
@@ -28,25 +30,77 @@ class ContentService:
         self.tracker = None
         self.last_topic_collection = None
         self.intent = IntentEngine(self.analyzer, store)
+        self._projection = (None, 0, None)
+        self._event_index = (None, 0, None)
 
-    def view(self):
+    def projection(self):
+        """Events, saved events and follows: recomputed only after stored data changes.
+
+        Revisions cover every table the projection reads; the age limit keeps time-based
+        ranking (recency decay, the 30-day window) from going stale on an idle database.
+        """
+        revision = self.store.revision()
+        cached_revision, cached_at, cached = self._projection
+        if cached_revision == revision and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
+            return cached
         materials, judgments = self.store.materials(), self.store.judgments(POLICY_HASH)
         preferences, interactions = self.store.preferences(), self.store.interactions()
         value = project(materials, judgments, preferences, interactions)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
-        saved_materials = [self.store.material(v) for v in saved_versions]
-        saved_view = project([m for m in saved_materials if m], judgments, preferences, interactions)
+        saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
+                             interactions)
         value["saved_events"] = [e for e in saved_view["events"] if e["saved"]]
         follows = self.store.follows()
         assessments = {f["plan_hash"]: self.store.intent_assessments(f["plan_hash"])
                        for f in follows if f.get("intent_plan")}
         value["follows"] = project_follows(follows, value["events"], materials, assessments)
+        value["preferences"] = preferences.model_dump()
+        self._projection = (revision, time.monotonic(), value)
+        return value
+
+    def view(self):
+        value = dict(self.projection())
         value["search_sources"] = [{"id": key, **meta, "access": source_access(key, self.settings)} for key, meta in SEARCH_SOURCES.items()]
         value["usage"] = self.model_usage()
-        value.update(preferences=self.store.preferences().model_dump(), sources=self.source_list(),
+        value.update(sources=self.source_list(),
                      model_configured=self.analyzer.configured, run=self.run, policy=POLICY_HASH,
                      last_visit=self.store.last_visit())
         return value
+
+    def event_versions(self):
+        """event id -> versions a reader action may name; what view() would show, without ranking.
+
+        Membership depends on content and saved items only, so the frequent "shown"/"opened"
+        actions do not force a full projection of the briefing.
+        """
+        actions = [a for a in active_actions(self.store.interactions(("saved", "retract")))
+                   if a["kind"] == "saved"]
+        key = (self.store.revision()[0], tuple(a["request_id"] for a in actions))
+        cached_key, cached_at, cached = self._event_index
+        if cached_key == key and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
+            return cached
+        judgments, preferences = self.store.judgments(POLICY_HASH), Preferences()
+        index = {e["id"]: {t["version"] for t in e["timeline"]}
+                 for e in project(self.store.materials(), judgments, preferences)["events"]}
+        saved = self.store.materials_by_versions({a["version"] for a in actions})
+        for event in project(saved, judgments, preferences, actions)["events"]:
+            # view() looks events up in events + saved_events and takes the first match.
+            if event["saved"] and event["id"] not in index:
+                index[event["id"]] = {t["version"] for t in event["timeline"]}
+        self._event_index = (key, time.monotonic(), index)
+        return index
+
+    def record_interaction(self, body):
+        if body.kind != "retract" and body.version not in self.event_versions().get(body.event_id, ()):
+            raise LookupError("内容版本不存在，请重新读取")
+        return self.store.interact(body)
+
+    def snapshot_view(self):
+        """What a past briefing needs to be re-read: its ranked events, not the whole library."""
+        value = self.view()
+        shown = set(value["focus"]) | set(value["radar"])
+        return {**value, "events": [e for e in value["events"] if e["id"] in shown],
+                "archive": [], "saved_events": [], "follows": [], "run": None}
 
     def source_list(self):
         states = self.store.source_states()
@@ -94,12 +148,12 @@ class ContentService:
                     await collect(self.store, self.sources, limit=3)
                     self.last_topic_collection = time.monotonic()
                 if plan:
-                    related = recall_candidates(plan, self.store.materials(), self.store.intent_assessments(follow["plan_hash"]), self.store.judgments(POLICY_HASH))
+                    related = recall_candidates(plan, await asyncio.to_thread(self.store.materials), self.store.intent_assessments(follow["plan_hash"]), self.store.judgments(POLICY_HASH))
                 else:
-                    related = [m for m in self.store.materials() if matches(follow, m.title + " " + m.text)]
+                    related = [m for m in await asyncio.to_thread(self.store.materials) if matches(follow, m.title + " " + m.text)]
                     related.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
                 await enrich(self.store, limit=2, materials=related[:4])
-                latest = {m.id: m for m in self.store.materials()}
+                latest = {m.id: m for m in await asyncio.to_thread(self.store.materials)}
                 related = [latest[m.id] for m in related[:6]]
             if intent_follow:
                 searches = intent_follow["intent_plan"]["searches"]
@@ -124,7 +178,7 @@ class ContentService:
                 run["errors"].append("source_unavailable")
             candidates = found
             if intent_follow:
-                candidates = recall_candidates(intent_follow["intent_plan"], self.store.materials(),
+                candidates = recall_candidates(intent_follow["intent_plan"], await asyncio.to_thread(self.store.materials),
                                                 self.store.intent_assessments(intent_follow["plan_hash"]),
                                                 self.store.judgments(POLICY_HASH))
                 ids = list(dict.fromkeys([m.id for m in candidates] + ids))[:200]
@@ -142,9 +196,10 @@ class ContentService:
                         run["intent_matched"] = sum(v["relevant"] for v in results.values())
                     except ValueError as error:
                         run["errors"].append(str(error))
-            await asyncio.sleep(0)
+            # Build the snapshot first: a cancel while it is prepared publishes nothing.
+            snapshot = await asyncio.to_thread(self.snapshot_view)
             run.update(state="completed", finished_at=now())
-            run["snapshot_id"] = self.store.snapshot(self.view())
+            run["snapshot_id"] = self.store.snapshot(snapshot)
         except asyncio.CancelledError:
             run.update(state="cancelled", finished_at=now())
         except Exception as error:
@@ -241,14 +296,14 @@ class ContentService:
             run["stage"] = "reading"
             await enrich(self.store, limit=min(24, request.analyze_limit))
             run["stage"] = "understanding"
-            candidates = self.store.materials()
+            candidates = await asyncio.to_thread(self.store.materials)
             candidates.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
             await self.analyze(candidates, run, request.analyze_limit)
             run["stage"] = "publishing"
-            await asyncio.sleep(0)
+            snapshot = await asyncio.to_thread(self.snapshot_view)
             run["state"] = "completed"
             run["finished_at"] = now()
-            run["snapshot_id"] = self.store.snapshot(self.view())
+            run["snapshot_id"] = self.store.snapshot(snapshot)
         except asyncio.CancelledError:
             run.update(state="cancelled", finished_at=now())
         except Exception as error:
