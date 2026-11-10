@@ -33,6 +33,10 @@ flowchart LR
 | `models.py`、`settings.py` | 数据契约与配置 |
 | `__main__.py` | 命令行：离线检查、导出、重查与有界采集 |
 
+前端：`ReaderApp.tsx` 负责页面与交互；`reader/types.ts` 是 `/api/reader` 返回数据的类型；`reader/logic.ts` 放不依赖 React 和浏览器的纯函数（路由、列表划分、证据标签），由 `frontend/tests/` 覆盖。
+
+版本号只写在 `backend/cfaw_news/__init__.py`，`pyproject.toml`、API 和 `/api/health` 都从这里读取。
+
 ## 不变量
 
 1. 素材版本写入后不改；同一版本的出处字段不同会拒绝写入。

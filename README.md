@@ -115,7 +115,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 
 ```bash
 . .venv/bin/activate
-python -m ruff check backend tests_reader
+python -m ruff check backend tests_reader scripts
 mkdir -p .tmp
 python -m pytest -q --basetemp .tmp/reader-check
 cd frontend

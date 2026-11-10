@@ -11,7 +11,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 COPY requirements.lock pyproject.toml LICENSE NOTICE ./
 RUN pip install --no-cache-dir -r requirements.lock
 COPY backend/ backend/
-COPY data/ data/
+COPY data/briefing_sources.json data/
 COPY frontend/public/ frontend/public/
 COPY --from=web /web/dist/ frontend/dist/
 RUN pip install --no-deps -e .

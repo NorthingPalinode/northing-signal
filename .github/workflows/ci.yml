@@ -5,9 +5,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Preservation tests compare fixture bytes with earlier frozen commits.
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -18,8 +15,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps -e .
-      - run: python -m ruff check backend tests_reader
-      - name: Product regressions and shared public-network boundary
+      - run: python -m ruff check backend tests_reader scripts
+      - name: Reader and public-network boundary tests
         run: |
           mkdir -p .tmp
           python -m pytest -q --basetemp .tmp/ci-tests --junitxml .tmp/ci-tests.xml
@@ -28,6 +25,24 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: offline-check-evidence
+          name: test-results
           path: |
             .tmp/ci-tests.xml
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t cfaw-news:ci .
+      - name: Container starts the reader and reports the package version
+        run: |
+          docker run -d --name cfaw -p 127.0.0.1:8000:8000 cfaw-news:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/api/health > health.json && break
+            sleep 1
+          done
+          cat health.json
+          expected=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/cfaw_news/__init__.py)
+          python3 -c "import json,sys; h=json.load(open('health.json')); assert h['engine']=='content-v1' and h['version']==sys.argv[1], h" "$expected"
+          curl -fsS -o /dev/null http://127.0.0.1:8000/
+      - if: failure()
+        run: docker logs cfaw || true

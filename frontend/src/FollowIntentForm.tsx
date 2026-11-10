@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { View } from "./ReaderApp";
+import type { View } from "./reader/types";
 import { searchSources, sourceName, type SearchSource } from "./searchSources";
 
 export type TrackingPlan = {

@@ -5,175 +5,30 @@ import FollowIntentForm, {
   type TrackingPlan,
 } from "./FollowIntentForm";
 
-type Topic =
-  | "models"
-  | "agents"
-  | "research"
-  | "engineering"
-  | "products"
-  | "industry";
-const topics: Record<Topic, string> = {
-  models: "模型与多模态",
-  agents: "Agent 与开发",
-  research: "研究与评测",
-  engineering: "部署与成本",
-  products: "产品与应用",
-  industry: "产业与政策",
-};
-type Prefs = {
-  topics: Topic[];
-  depth: "balanced" | "technical" | "overview";
-  budget_minutes: 3 | 7 | 15;
-  exploration: boolean;
-};
-type Claim = { statement: string; quote: string; kind: string };
-type Action = { request_id: string; kind: string; at: string; version: string };
-type Entry = {
-  content_kind?: string;
-  version: string;
-  title: string;
-  summary: string;
-  source: string;
-  role: string;
-  url: string;
-  published_at: string | null;
-  action: string;
-  evidence: string;
-  claims: Claim[];
-  conditions: string[];
-  limitations: string[];
-};
-type Story = {
-  content_kind?: string;
-  id: string;
-  version: string;
-  title: string;
-  summary: string;
-  reason: string;
-  topic: Topic;
-  topic_label: string;
-  action: string;
-  evidence: string;
-  conditions: string[];
-  limitations: string[];
-  source: string;
-  source_role: string;
-  url: string;
-  published_at: string | null;
-  captured_at: string;
-  source_count: number;
-  report_count: number;
-  qualified: boolean;
-  protected: boolean;
-  known: boolean;
-  dismissed: boolean;
-  saved: boolean;
-  relevant: boolean;
-  claims: Claim[];
-  timeline: Entry[];
-  reading_seconds: number;
-  actions: Action[];
-  subject?: string;
-  object?: string;
-};
-type Follow = {
-  id: string;
-  name: string;
-  query: string;
-  active: boolean;
-  last_checked: string | null;
-  last_status: string;
-  last_errors?: string[];
-  event_ids: string[];
-  unread_ids: string[];
-  material_versions: string[];
-  description?: string;
-  intent_plan?: TrackingPlan;
-  reasons?: Record<string, string>;
-};
-type Source = {
-  id: string;
-  description?: string;
-  priority?: number;
-  name: string;
-  role: string;
-  url: string;
-  kind: string;
-  state: {
-    status: string;
-    at?: string;
-    last_success?: string;
-    count?: number;
-    added?: number;
-    with_text?: number;
-    http_status?: number;
-    error?: string;
-  };
-};
-type Run = {
-  id: string;
-  state: string;
-  stage: string;
-  sources_done: number;
-  analyzed: number;
-  total?: number;
-  failed: number;
-  errors: string[];
-  kind?: string;
-  query?: string;
-  follow_name?: string;
-  found?: number;
-  result_versions?: string[];
-};
-type Archive = {
-  content_kind?: string;
-  id: string;
-  version: string;
-  title: string;
-  source: string;
-  url: string;
-  published_at: string | null;
-  summary?: string;
-  status: string;
-};
-export type View = {
-  as_of: string;
-  last_visit?: string | null;
-  events: Story[];
-  focus: string[];
-  radar: string[];
-  archive: Archive[];
-  budget_seconds: number;
-  estimated_seconds: number;
-  counts: {
-    materials: number;
-    events: number;
-    eligible: number;
-    pending: number;
-    unrelated: number;
-  };
-  preferences: Prefs;
-  sources: Source[];
-  model_configured: boolean;
-  usage?: {
-    requests_today: number;
-    tokens_today: number;
-    request_limit: number | null;
-    token_limit: number | null;
-  };
-  run: Run | null;
-  follows?: Follow[];
-  saved_events?: Story[];
-  confirmed_follow_id?: string;
-};
-type Page = "briefing" | "discover" | "following" | "library";
+import {
+  actionLabel,
+  evidence,
+  feedbackNotice,
+  followSeed,
+  pageFromHash,
+  sections,
+  statusLabel,
+  topics,
+  when,
+} from "./reader/logic";
+import type {
+  Action,
+  Follow,
+  Page,
+  Prefs,
+  Run,
+  Source,
+  Story,
+  Topic,
+  View,
+} from "./reader/types";
 
-function currentPage(): Page {
-  const hash = window.location.hash.slice(1);
-  return ["discover", "following", "library"].includes(hash)
-    ? (hash as Page)
-    : "briefing";
-}
+const currentPage = (): Page => pageFromHash(window.location.hash);
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch("/api/reader" + path, {
@@ -189,53 +44,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     );
   return value;
 }
-const when = (value?: string | null) => {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat("zh-CN", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(date)
-    : "时间未确认";
-};
-const evidence = (value: string, role?: string, kind?: string) =>
-  kind === "benchmark_snapshot"
-    ? "公开榜单数据"
-    : kind === "index_abstract"
-    ? "索引摘要"
-    : kind === "community_post"
-      ? "社区发言"
-      : role === "community" && kind === "publisher_excerpt"
-        ? "社区线索原文"
-        : kind === "publisher_excerpt" && value === "source_attributed"
-          ? "原文陈述"
-          : value === "reported_test"
-            ? "文中报告测试"
-            : value === "opinion"
-              ? "作者观点"
-              : value === "insufficient"
-                ? "材料待补充"
-                : role === "official" || role === "research"
-                  ? "原文陈述"
-                  : "报道转述";
-const actionLabel: Record<string, string> = {
-  release: "发布",
-  update: "实质更新",
-  test: "测试",
-  correction: "更正",
-  withdrawal: "撤回",
-  explain: "方法与解读",
-  other: "进展",
-};
-const statusLabel: Record<string, string> = {
-  pending: "尚待整理",
-  ai: "AI 相关",
-  unrelated: "未纳入推荐",
-  uncertain: "相关性待确认",
-  time_uncertain: "日期待核对",
-};
 
 function Glyph({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, string> = {
@@ -501,17 +309,7 @@ export default function ReaderApp() {
             action.request_id,
           );
       } else await send(story, kind);
-      setNotice(
-        kind === "known"
-          ? "已标记了解；有实质更新时仍会出现。"
-          : kind === "saved"
-            ? story.saved
-              ? "已取消收藏。"
-              : "已收藏，可在「关注 → 我的收藏」中找到。"
-            : kind === "useful"
-              ? "已记录，下次整理会参考你的反馈。"
-              : "已记录，这条内容将减少推荐。",
-      );
+      setNotice(feedbackNotice(kind, story.saved));
       setFeedback(null);
       const updated = await load();
       setDetail((d) =>
@@ -606,14 +404,8 @@ export default function ReaderApp() {
     if (historical) void load().catch((e) => setError(e.message));
   }
   function beginFollow(description = "", context = "", followId?: string) {
-    const seed = description || context;
     setFollowForm({
-      description:
-        seed.length >= 10
-          ? seed
-          : seed
-            ? `我想持续了解「${seed}」的新进展，请帮我明确值得追踪的方向。`
-            : "",
+      description: followSeed(description, context),
       follow_id: followId,
     });
   }
@@ -661,28 +453,17 @@ export default function ReaderApp() {
     }
   }
   const running = run?.state === "running";
-  const matches = (e: Story) =>
-    (!topic || e.topic === topic) &&
-    (!query ||
-      (e.title + e.summary + e.source)
-        .toLowerCase()
-        .includes(query.toLowerCase()));
-  const events = view?.events.filter(matches) || [];
-  const focus = events.filter((e) => view?.focus.includes(e.id));
-  const radar = events.filter((e) => view?.radar.includes(e.id));
-  const discover = events.filter((e) => e.qualified && !e.dismissed);
-  const follows = view?.follows || [];
-  const followed = follows.find((f) => f.id === selectedFollow) || follows[0];
-  const saved = (
-    view?.saved_events ||
-    view?.events.filter((e) => e.saved) ||
-    []
-  ).filter(matches);
-  const followingEvents = events.filter((e) =>
-    followed?.event_ids.includes(e.id),
-  );
-  const okSources =
-    view?.sources.filter((s) => s.state.status === "ok").length || 0;
+  const {
+    events,
+    focus,
+    radar,
+    discover,
+    follows,
+    followed,
+    saved,
+    followingEvents,
+    okSources,
+  } = sections(view, topic, query, selectedFollow);
 
   function card(story: Story, index = 0) {
     const intentReason =

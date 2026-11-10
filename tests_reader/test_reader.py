@@ -240,7 +240,10 @@ def test_api_boundary_preferences_and_missing_revision(tmp_path):
     from fastapi.testclient import TestClient
     store = Store(tmp_path / "reader.db")
     with TestClient(create_app(settings(), store)) as client:
-        assert client.get("/api/health").json()["engine"] == "content-v1"
+        from cfaw_news import __version__
+        health = client.get("/api/health").json()
+        assert health["engine"] == "content-v1" and health["version"] == __version__
+        assert client.get("/openapi.json").json()["info"]["version"] == __version__
         assert client.get("/api/reader").json()["counts"]["materials"] == 0
         assert client.put("/api/reader/preferences", json=Preferences().model_dump(),
                           headers={"Origin": "https://evil.example"}).status_code == 403

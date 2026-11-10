@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cfaw-news"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A local AI intelligence reader with evidence and confirmed topic tracking"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,6 +18,9 @@ dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
 
 [tool.setuptools.packages.find]
 where = ["backend"]
+
+[tool.setuptools.dynamic]
+version = {attr = "cfaw_news.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests_reader"]
