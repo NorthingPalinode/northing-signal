@@ -1,6 +1,7 @@
 """Standalone local AI reader."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from .models import (
     TOPICS,
+    CancelRequest,
     ConfirmFollow,
     DiscoveryRequest,
     FollowState,
@@ -32,6 +34,10 @@ def create_app(settings=None, store=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        if service.analyzer.configured and settings.reader_requests_per_day is None \
+                and settings.reader_tokens_per_day is None:
+            logging.getLogger(__name__).warning(
+                "No daily model limit is set (READER_REQUESTS_PER_DAY / READER_TOKENS_PER_DAY); usage is only recorded.")
         service.start_tracking()
         yield
         await service.close()
@@ -87,7 +93,7 @@ def create_app(settings=None, store=None):
 
     @app.get("/api/reader/status")
     async def status():
-        return {"run": service.run, "sources": service.source_list(),
+        return {"run": service.run, "queue": service.queued(), "sources": service.source_list(),
                 "model_configured": service.analyzer.configured,
                 "usage": service.model_usage()}
 
@@ -103,8 +109,11 @@ def create_app(settings=None, store=None):
             raise HTTPException(409, str(error)) from None
 
     @app.post("/api/reader/cancel")
-    async def cancel():
-        return await service.cancel()
+    async def cancel(body: CancelRequest | None = None):
+        try:
+            return await service.cancel(body.id if body else None)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
 
     @app.post("/api/reader/discover", status_code=202)
     async def discovery(body: DiscoveryRequest):
@@ -135,11 +144,12 @@ def create_app(settings=None, store=None):
     async def follow(body: ConfirmFollow):
         try:
             row, changed = store.confirm_follow(body)
-            if changed and service.run and service.run.get("follow_id") == row["id"]:
-                await service.cancel()
-                store.update_follow(row["id"], last_checked=None, last_status="not_checked", last_errors=[])
-            if changed and row["active"] and not (service.task and not service.task.done()):
-                service.start_follow(row["id"])
+            if changed:
+                # Work queued or running under the replaced plan must not finish under the new one.
+                if await service.cancel_follow(row["id"]):
+                    store.update_follow(row["id"], last_checked=None, last_status="not_checked", last_errors=[])
+                if row["active"]:
+                    service.start_follow(row["id"])
             return {**await off_loop(service.view), "confirmed_follow_id": row["id"]}
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
@@ -151,8 +161,8 @@ def create_app(settings=None, store=None):
             if body.active and current and not current.get("intent_plan"):
                 raise HTTPException(409, "请先重新描述需求，确认 AI 追踪方案后再开启。")
             store.update_follow(key, active=body.active)
-            if not body.active and service.run and service.run.get("follow_id") == key:
-                await service.cancel()
+            if not body.active:
+                await service.cancel_follow(key)
             return await off_loop(service.view)
         except ValueError as error:
             raise HTTPException(404, str(error)) from None
@@ -160,8 +170,7 @@ def create_app(settings=None, store=None):
     @app.delete("/api/reader/follows/{key}")
     async def unfollow(key: str):
         try:
-            if service.run and service.run.get("follow_id") == key:
-                await service.cancel()
+            await service.cancel_follow(key)
             store.update_follow(key, active=False, archived=True)
             return await off_loop(service.view)
         except ValueError as error:
@@ -192,6 +201,13 @@ def create_app(settings=None, store=None):
             raise HTTPException(404, str(error)) from None
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
+
+    @app.post("/api/reader/materials/{version}/retry")
+    async def retry_material(version: str):
+        """Clear a material's failed judgments so the next update tries it again."""
+        if not await off_loop(store.clear_failure, version):
+            raise HTTPException(404, "这条材料没有整理失败记录")
+        return await off_loop(service.view)
 
     @app.get("/api/reader/materials/{version}")
     async def material(version: str):

@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from .models import TOPICS, Assessment, digest, now
+from .models import POLICY_EPOCH, TOPICS, assessment_of, digest, now
 
 
 def stamp(value):
@@ -47,7 +47,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None):
         if not row:
             archive.append(brief)
             continue
-        assessment = Assessment.model_validate({k: v for k, v in row.items() if k != "model"})
+        assessment = assessment_of(row)
         future = stamp(material.published_at)
         if future and future > clock + timedelta(hours=24):
             brief.update(status="time_uncertain")
@@ -65,7 +65,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None):
         original = normalize(material.text)
         if len(original) >= 120:
             group = identical.setdefault(digest(original), group)
-        groups[group].append((material, assessment, row.get("model")))
+        groups[group].append((material, assessment, row))
 
     actions = active_actions(interactions)
     affinities = defaultdict(float)
@@ -91,7 +91,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None):
             return (usable and worth, urgent, a.action in {"test", "update"},
                     material.source_role in {"official", "research"},
                     a.significance * 3 + a.novelty * 2 + a.usefulness, date)
-        material, a, model = max(members, key=priority)
+        material, a, row = max(members, key=priority)
         value = a.significance * 3 + a.novelty * 2 + a.usefulness
         qualified = (bool(a.claims) and a.evidence != "insufficient"
                      and (value >= 9 or a.action in {"correction", "withdrawal"}))
@@ -136,7 +136,10 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None):
             "saved": any(r["kind"] == "saved" for r in actions if r["event_id"] == event_id),
             "relevant": relevant, "score": round(score, 2), "timeline": timeline,
             "age_days": round(age_days, 1),
-            "model": model, "reading_seconds": max(25, min(100, round((len(a.summary) + len(a.reason)) / 5))),
+            "model": row.get("model"),
+            # Judged under rules an epoch older than the running ones; re-judged as budget allows.
+            "policy_stale": row.get("epoch", POLICY_EPOCH) < POLICY_EPOCH,
+            "reading_seconds": max(25, min(100, round((len(a.summary) + len(a.reason)) / 5))),
             "actions": [r for r in actions if r["event_id"] == event_id
                         and (r["version"] == version or r["kind"] == "saved")],
         })

@@ -63,6 +63,8 @@ export type Story = {
   actions: Action[];
   subject?: string;
   object?: string;
+  /** Judged under an older policy epoch; waiting to be re-judged. */
+  policy_stale?: boolean;
 };
 export type Follow = {
   id: string;
@@ -100,6 +102,7 @@ export type Source = {
 };
 export type Run = {
   id: string;
+  /** queued | running | completed | cancelled | failed */
   state: string;
   stage: string;
   sources_done: number;
@@ -112,6 +115,7 @@ export type Run = {
   follow_name?: string;
   found?: number;
   result_versions?: string[];
+  follow_id?: string;
 };
 export type Archive = {
   content_kind?: string;
@@ -122,7 +126,9 @@ export type Archive = {
   url: string;
   published_at: string | null;
   summary?: string;
+  /** pending | retrying | failed | ai | unrelated | uncertain | time_uncertain */
   status: string;
+  failure?: { code: string; attempts: number; retry_at: string | null };
 };
 export type View = {
   as_of: string;
@@ -139,6 +145,7 @@ export type View = {
     eligible: number;
     pending: number;
     unrelated: number;
+    failed?: number;
   };
   preferences: Prefs;
   sources: Source[];
@@ -150,6 +157,7 @@ export type View = {
     token_limit: number | null;
   };
   run: Run | null;
+  queue?: Run[];
   follows?: Follow[];
   saved_events?: Story[];
   confirmed_follow_id?: string;

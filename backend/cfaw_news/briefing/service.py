@@ -4,18 +4,22 @@ import asyncio
 import json
 import logging
 import time
+from collections import deque
 from uuid import uuid4
 
 from .collect import collect, enrich
 from .discover import discover
 from .engine import active_actions, project, stamp
 from .intent import IntentEngine, recall_candidates
-from .models import Preferences, now
+from .models import POLICY_EPOCH, Preferences, day_start, now
 from .search_sources import SEARCH_SOURCES, source_access
 from .tracking import matches, project_follows
 from .understand import POLICY_HASH, Analyzer, has_material
 
 PROJECTION_MAX_AGE = 600
+# Later batches would fail the same way: no budget, no model, or the provider is unreachable.
+QUEUE_LIMIT = 8
+STOP_ANALYSIS = {"daily_model_budget_reached", "model_not_configured", "model_request_failed"}
 
 
 class ContentService:
@@ -27,9 +31,12 @@ class ContentService:
                                  tokens_per_day=getattr(settings, "reader_tokens_per_day", None))
         self.task = None
         self.run = None
+        self.queue = []  # [(run, job)] waiting for the single worker
+        self.closing = False
         self.tracker = None
         self.last_topic_collection = None
         self.intent = IntentEngine(self.analyzer, store)
+        store.adopt_policy(POLICY_HASH)
         self._projection = (None, 0, None)
         self._event_index = (None, 0, None)
 
@@ -43,7 +50,7 @@ class ContentService:
         cached_revision, cached_at, cached = self._projection
         if cached_revision == revision and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
             return cached
-        materials, judgments = self.store.materials(), self.store.judgments(POLICY_HASH)
+        materials, judgments = self.store.materials(), self.store.judgments()
         preferences, interactions = self.store.preferences(), self.store.interactions()
         value = project(materials, judgments, preferences, interactions)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
@@ -55,6 +62,14 @@ class ContentService:
                        for f in follows if f.get("intent_plan")}
         value["follows"] = project_follows(follows, value["events"], materials, assessments)
         value["preferences"] = preferences.model_dump()
+        failures = self.store.failures()
+        for row in value["archive"]:
+            failure = failures.get(row["version"]) if row["status"] == "pending" else None
+            if failure:
+                row.update(status="failed" if failure["gave_up"] else "retrying",
+                           failure={k: failure[k] for k in ("code", "attempts", "retry_at")})
+        value["counts"].update(pending=sum(r["status"] in {"pending", "retrying"} for r in value["archive"]),
+                               failed=sum(r["status"] == "failed" for r in value["archive"]))
         self._projection = (revision, time.monotonic(), value)
         return value
 
@@ -63,7 +78,8 @@ class ContentService:
         value["search_sources"] = [{"id": key, **meta, "access": source_access(key, self.settings)} for key, meta in SEARCH_SOURCES.items()]
         value["usage"] = self.model_usage()
         value.update(sources=self.source_list(),
-                     model_configured=self.analyzer.configured, run=self.run, policy=POLICY_HASH,
+                     model_configured=self.analyzer.configured, run=self.run, queue=self.queued(),
+                     policy=POLICY_HASH,
                      last_visit=self.store.last_visit())
         return value
 
@@ -79,7 +95,7 @@ class ContentService:
         cached_key, cached_at, cached = self._event_index
         if cached_key == key and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
             return cached
-        judgments, preferences = self.store.judgments(POLICY_HASH), Preferences()
+        judgments, preferences = self.store.judgments(), Preferences()
         index = {e["id"]: {t["version"] for t in e["timeline"]}
                  for e in project(self.store.materials(), judgments, preferences)["events"]}
         saved = self.store.materials_by_versions({a["version"] for a in actions})
@@ -100,7 +116,7 @@ class ContentService:
         value = self.view()
         shown = set(value["focus"]) | set(value["radar"])
         return {**value, "events": [e for e in value["events"] if e["id"] in shown],
-                "archive": [], "saved_events": [], "follows": [], "run": None}
+                "archive": [], "saved_events": [], "follows": [], "run": None, "queue": []}
 
     def source_list(self):
         states = self.store.source_states()
@@ -118,21 +134,15 @@ class ContentService:
         return result
 
     def model_usage(self):
-        receipts = self.store.receipts_today()
+        receipts = self.store.receipts_today(day_start(getattr(self.settings, "reader_timezone", "")))
         return {"requests_today": len(receipts),
                 "tokens_today": sum(r.get("charged_tokens", 0) for r in receipts),
                 "request_limit": self.analyzer.requests_per_day,
                 "token_limit": self.analyzer.tokens_per_day}
 
     def start_discovery(self, request):
-        if self.task and not self.task.done():
-            raise ValueError("已有更新正在处理")
-        self.run = {"id": str(uuid4()), "kind": "discovery", "query": request.query,
-                    "channels": request.channels,
-                    "state": "running", "stage": "discovering", "started_at": now(),
-                    "sources_done": 0, "analyzed": 0, "failed": 0, "errors": [], "snapshot_id": None}
-        self.task = asyncio.create_task(self.discover(request.query, self.run))
-        return self.run
+        run = self.new_run("discovery", "discovering", query=request.query, channels=request.channels)
+        return self.submit(run, lambda run: self.discover(request.query, run))
 
     async def discover(self, query, run):
         try:
@@ -148,7 +158,7 @@ class ContentService:
                     await collect(self.store, self.sources, limit=3)
                     self.last_topic_collection = time.monotonic()
                 if plan:
-                    related = recall_candidates(plan, await asyncio.to_thread(self.store.materials), self.store.intent_assessments(follow["plan_hash"]), self.store.judgments(POLICY_HASH))
+                    related = recall_candidates(plan, await asyncio.to_thread(self.store.materials), self.store.intent_assessments(follow["plan_hash"]), self.store.judgments())
                 else:
                     related = [m for m in await asyncio.to_thread(self.store.materials) if matches(follow, m.title + " " + m.text)]
                     related.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
@@ -180,12 +190,12 @@ class ContentService:
             if intent_follow:
                 candidates = recall_candidates(intent_follow["intent_plan"], await asyncio.to_thread(self.store.materials),
                                                 self.store.intent_assessments(intent_follow["plan_hash"]),
-                                                self.store.judgments(POLICY_HASH))
+                                                self.store.judgments())
                 ids = list(dict.fromkeys([m.id for m in candidates] + ids))[:200]
                 self.store.update_follow(intent_follow["id"], material_ids=ids)
-            await self.analyze(candidates, run, 6)
+            await self.analyze(candidates, run, getattr(self.settings, "reader_follow_analyze_limit", 6))
             if intent_follow:
-                judgments = self.store.judgments(POLICY_HASH)
+                judgments = self.store.judgments()
                 eligible = [m for m in candidates if m.version in judgments]
                 if eligible:
                     try:
@@ -214,62 +224,144 @@ class ContentService:
                 self.store.update_follow(run["follow_id"], last_checked=now(), last_status=status,
                                          last_found=run.get("found", 0), last_errors=run["errors"])
 
+    def pending_judgments(self, materials, limit):
+        """Unjudged materials first, then ones judged under an older epoch; skips backoff."""
+        judgments, failures, clock = self.store.judgments(), self.store.failures(), now()
+
+        def ready(material):
+            failure = failures.get(material.version)
+            return has_material(material) and (not failure or (not failure["gave_up"] and failure["retry_at"] <= clock))
+        fresh = [m for m in materials if m.version not in judgments and ready(m)]
+        stale = [m for m in materials if m.version in judgments
+                 and judgments[m.version]["epoch"] < POLICY_EPOCH and ready(m)]
+        return (fresh + stale)[:limit]
+
     async def analyze(self, materials, run, limit):
-        old = self.store.judgments(POLICY_HASH)
-        pending = [m for m in materials if m.version not in old and has_material(m)][:limit]
+        pending = self.pending_judgments(materials, limit)
         run.update(stage="understanding", total=len(pending))
         if not self.analyzer.configured and pending:
             run["failed"] += len(pending)
             run["errors"].append("model_not_configured")
             return
-        for i in range(0, len(pending), 2):
-            batch = pending[i:i + 2]
-            try:
-                results = await self.analyzer.batch(batch)
-                await asyncio.sleep(0)
-                for version, value in results.items():
-                    self.store.judge(version, POLICY_HASH, value, self.settings.llm_model)
-                run["analyzed"] += len(results)
-                run["failed"] += len(batch) - len(results)
-            except ValueError as error:
-                code = str(error)
-                run["failed"] += len(batch)
-                if code not in run["errors"]:
-                    run["errors"].append(code)
-                if code in {"daily_model_budget_reached", "model_not_configured"}:
-                    break
+        size = getattr(self.settings, "reader_batch_size", 4)
+        batches = deque(pending[i:i + size] for i in range(0, len(pending), size))
+        stopped = set()
 
-    def start_follow(self, key):
+        async def worker():
+            while batches and not stopped:
+                batch = batches.popleft()
+                try:
+                    results = await self.analyzer.batch(batch)
+                    await asyncio.sleep(0)
+                    for version, value in results.items():
+                        self.store.judge(version, POLICY_HASH, value, self.settings.llm_model, POLICY_EPOCH)
+                    run["analyzed"] += len(results)
+                    run["failed"] += len(batch) - len(results)
+                except ValueError as error:
+                    code = str(error)
+                    if code.endswith(":model_output_truncated") and len(batch) > 1:
+                        half = len(batch) // 2  # shorter replies fit; retry both halves next
+                        batches.extendleft([batch[half:], batch[:half]])
+                        continue
+                    run["failed"] += len(batch)
+                    if code not in run["errors"]:
+                        run["errors"].append(code)
+                    if code in STOP_ANALYSIS:
+                        stopped.add(code)
+        await asyncio.gather(*(worker() for _ in range(getattr(self.settings, "reader_model_concurrency", 1))))
+
+    def new_run(self, kind, stage, **fields):
+        return {"id": str(uuid4()), "kind": kind, **fields, "state": "queued", "stage": stage,
+                "queued_at": now(), "sources_done": 0, "analyzed": 0, "failed": 0, "errors": [],
+                "snapshot_id": None}
+
+    def busy(self):
+        return bool(self.task and not self.task.done())
+
+    def pending(self, match):
+        """The running or queued run that satisfies match, if any."""
+        if self.busy() and self.run and match(self.run):
+            return self.run
+        return next((run for run, _ in self.queue if match(run)), None)
+
+    def submit(self, run, job, *, manual=True):
+        """Run now when idle, otherwise queue: manual work goes ahead of scheduled checks."""
+        run["manual"] = manual
+        if not self.busy():
+            return self.launch(run, job)
+        if len(self.queue) >= QUEUE_LIMIT:
+            raise ValueError("排队的任务已满，请等当前任务完成后再试")
+        position = len(self.queue)
+        if manual:
+            position = next((i for i, (queued, _) in enumerate(self.queue) if not queued["manual"]), position)
+        self.queue.insert(position, (run, job))
+        return run
+
+    def launch(self, run, job):
+        run.update(state="running", started_at=now())
+        self.run = run
+        self.task = asyncio.create_task(self.execute(run, job))
+        return run
+
+    async def execute(self, run, job):
+        try:
+            await job(run)
+        except asyncio.CancelledError:
+            self.mark_cancelled(run)
+        finally:
+            if self.queue and not self.closing:
+                self.launch(*self.queue.pop(0))
+
+    def mark_cancelled(self, run):
+        """For a job cancelled before its own handler ran (or before it started at all)."""
+        if run["state"] in {"running", "queued"}:
+            run.update(state="cancelled", finished_at=now())
+            if run.get("follow_id"):
+                self.store.update_follow(run["follow_id"], last_status="cancelled")
+
+    def start_follow(self, key, manual=True):
         follow = next((f for f in self.store.follows() if f["id"] == key), None)
         if not follow or not follow["active"]:
             raise ValueError("请先启用这个话题的追踪")
         if not follow.get("intent_plan") or not follow.get("confirmed_at"):
             raise ValueError("请先描述需求并确认追踪方案")
-        if self.task and not self.task.done():
-            raise ValueError("已有更新正在处理，话题会在之后继续追踪")
-        self.store.update_follow(key, last_checked=now(), last_status="checking")
-        self.run = {"id": str(uuid4()), "kind": "following", "follow_id": key, "query": follow["query"],
-                    "follow_name": follow["name"], "state": "running", "stage": "discovering", "started_at": now(),
-                    "sources_done": 0, "analyzed": 0, "failed": 0, "errors": [], "snapshot_id": None}
-        self.task = asyncio.create_task(self.discover(follow["query"], self.run))
-        return self.run
+        existing = self.pending(lambda run: run.get("follow_id") == key)
+        if existing:
+            if manual and existing["state"] == "queued" and not existing["manual"]:
+                # Asked for now: move the scheduled check up with the other manual work.
+                entry = next(e for e in self.queue if e[0] is existing)
+                self.queue.remove(entry)
+                self.submit(*entry)
+            return existing
+
+        async def job(run):
+            self.store.update_follow(key, last_checked=now(), last_status="checking")
+            await self.discover(follow["query"], run)
+        run = self.submit(self.new_run("following", "discovering", follow_id=key, query=follow["query"],
+                                       follow_name=follow["name"]), job, manual=manual)
+        if run["state"] == "queued":
+            self.store.update_follow(key, last_status="queued")
+        return run
 
     def start_tracking(self):
         for follow in self.store.follows():
             if follow["active"] and not follow.get("intent_plan"):
                 self.store.update_follow(follow["id"], active=False, last_status="needs_intent")
+            elif follow.get("last_status") in {"queued", "checking"}:
+                # The queue lives in memory: a check queued or running before a restart is gone.
+                self.store.update_follow(follow["id"], last_status="cancelled")
         if not self.tracker or self.tracker.done():
             self.tracker = asyncio.create_task(self.tracking_loop())
 
     def track_due(self):
-        if self.task and not self.task.done():
-            return
         clock = stamp(now())
         due = [f for f in self.store.follows() if f["active"] and f.get("intent_plan") and f.get("confirmed_at") and
                (not f.get("last_checked") or (clock - stamp(f["last_checked"])).total_seconds() >=
                 f.get("intent_plan", {}).get("interval_minutes", 30) * 60)]
-        if due:
-            self.start_follow(min(due, key=lambda f: f.get("last_checked") or "")["id"])
+        for follow in sorted(due, key=lambda f: f.get("last_checked") or ""):
+            if len(self.queue) >= QUEUE_LIMIT:
+                break
+            self.start_follow(follow["id"], manual=False)
 
     async def tracking_loop(self):
         while True:
@@ -280,12 +372,10 @@ class ContentService:
                 logging.getLogger(__name__).warning("Topic tracking check failed: %s", type(error).__name__)
 
     def start(self, request):
-        if self.task and not self.task.done():
-            raise ValueError("已有更新正在处理")
-        self.run = {"id": str(uuid4()), "kind": "refresh", "state": "running", "stage": "collecting", "started_at": now(),
-                    "sources_done": 0, "analyzed": 0, "failed": 0, "errors": [], "snapshot_id": None}
-        self.task = asyncio.create_task(self.refresh(request, self.run))
-        return self.run
+        existing = self.pending(lambda run: run["kind"] == "refresh")
+        if existing:
+            return existing
+        return self.submit(self.new_run("refresh", "collecting"), lambda run: self.refresh(request, run))
 
     async def refresh(self, request, run):
         def progress(name, state):
@@ -310,13 +400,49 @@ class ContentService:
             run.update(state="failed", finished_at=now())
             run["errors"].append(type(error).__name__)
 
-    async def cancel(self):
-        if self.task and not self.task.done():
-            self.task.cancel()
-            await self.task
+    async def cancel(self, run_id=None):
+        """Stop the running job (default) or drop a queued one; the queue then moves on."""
+        if run_id and run_id != (self.run or {}).get("id"):
+            for index, (run, _) in enumerate(self.queue):
+                if run["id"] == run_id:
+                    self.queue.pop(index)
+                    self.mark_cancelled(run)
+                    return run
+            raise LookupError("这个任务已经结束或不存在")
+        if self.busy():
+            task, run = self.task, self.run
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            # A task cancelled before its first step never ran execute(): settle it here.
+            self.mark_cancelled(run)
+            if self.queue and not self.closing and not self.busy():
+                self.launch(*self.queue.pop(0))
+            return run
         return self.run
 
+    async def cancel_follow(self, key):
+        """Drop queued checks of a topic and stop its running one; True when anything stopped."""
+        stopped = False
+        for run, _ in list(self.queue):
+            if run.get("follow_id") == key:
+                await self.cancel(run["id"])
+                stopped = True
+        if self.busy() and self.run.get("follow_id") == key:
+            await self.cancel()
+            stopped = True
+        return stopped
+
+    def queued(self):
+        return [run for run, _ in self.queue]
+
     async def close(self):
+        self.closing = True
+        for run, _ in self.queue:
+            run.update(state="cancelled", finished_at=now())
+        self.queue.clear()
         if self.tracker and not self.tracker.done():
             self.tracker.cancel()
             try:

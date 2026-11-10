@@ -1,5 +1,5 @@
 // Pure reader helpers: no React, DOM or network, so they run under node --test.
-import type { Page, Story, Topic, View } from "./types";
+import type { Page, Run, Story, Topic, View } from "./types";
 
 export const topics: Record<Topic, string> = {
   models: "模型与多模态",
@@ -63,6 +63,8 @@ export const statusLabel: Record<string, string> = {
   unrelated: "未纳入推荐",
   uncertain: "相关性待确认",
   time_uncertain: "日期待核对",
+  retrying: "整理失败，稍后重试",
+  failed: "整理失败",
 };
 
 export const matchesStory = (story: Story, topic: string, query: string) =>
@@ -116,4 +118,13 @@ export function feedbackNotice(kind: string, wasSaved: boolean) {
       : kind === "useful"
         ? "已记录，下次整理会参考你的反馈。"
         : "已记录，这条内容将减少推荐。";
+}
+
+/** Short label for one waiting job in the task queue. */
+export function queueLabel(run: Run) {
+  return run.kind === "following"
+    ? `追踪「${run.follow_name}」`
+    : run.kind === "discovery"
+      ? `搜索「${run.query}」`
+      : "更新情报";
 }

@@ -11,6 +11,7 @@ import {
   feedbackNotice,
   followSeed,
   pageFromHash,
+  queueLabel,
   sections,
   statusLabel,
   topics,
@@ -185,6 +186,7 @@ export default function ReaderApp() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [run, setRun] = useState<Run | null>(null);
+  const [queue, setQueue] = useState<Run[]>([]);
   const [detail, setDetail] = useState<Story | null>(null);
   const [settings, setSettings] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -225,6 +227,7 @@ export default function ReaderApp() {
     setView(result);
     setHistorical(null);
     setRun(result.run);
+    setQueue(result.queue || []);
     setError("");
     return result;
   }, []);
@@ -265,14 +268,22 @@ export default function ReaderApp() {
     return () => document.removeEventListener("visibilitychange", mark);
   }, [!!view, page]);
   useEffect(() => {
-    if (run?.state !== "running") return;
+    if (run?.state !== "running" && !queue.length) return;
     let stopped = false;
+    const watched = run?.id;
     const timer = setInterval(() => {
-      void request<{ run: Run | null; sources: Source[] }>("/status")
+      void request<{ run: Run | null; queue: Run[]; sources: Source[] }>(
+        "/status",
+      )
         .then((result) => {
           if (stopped) return;
           setRun(result.run);
-          if (result.run?.state !== "running")
+          setQueue(result.queue || []);
+          // A finished job, or the next queued one taking over, has new content to show.
+          if (
+            result.run?.state !== "running" ||
+            result.run?.id !== watched
+          )
             void load().catch((e) => setError(e.message));
         })
         .catch((e) => {
@@ -283,7 +294,34 @@ export default function ReaderApp() {
       stopped = true;
       clearInterval(timer);
     };
-  }, [run?.state, load]);
+  }, [run?.state, run?.id, queue.length, load]);
+  async function syncStatus() {
+    const result = await request<{ run: Run | null; queue: Run[] }>(
+      "/status",
+    );
+    setRun(result.run);
+    setQueue(result.queue || []);
+  }
+  /** Show a started job's progress, or say where a queued one waits. */
+  function accept(next: Run, startedNotice = "") {
+    if (next.state === "queued") {
+      setNotice("已加入队列，当前任务完成后自动开始。");
+      void syncStatus().catch((e) => setError(e.message));
+    } else {
+      setRun(next);
+      if (startedNotice) setNotice(startedNotice);
+    }
+  }
+  async function retry(version: string) {
+    try {
+      setView(
+        await request<View>(`/materials/${version}/retry`, { method: "POST" }),
+      );
+      setNotice("已清除失败记录，下次更新时会重新整理。");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   const send = useCallback(
     async (story: Story, kind: string, retracts?: string) => {
       await request("/interactions", {
@@ -346,7 +384,7 @@ export default function ReaderApp() {
   async function supplement() {
     if (discoveryQuery.trim().length < 2 || !discoveryChannels.length) return;
     try {
-      setRun(
+      accept(
         await request<Run>("/discover", {
           method: "POST",
           body: JSON.stringify({
@@ -354,8 +392,6 @@ export default function ReaderApp() {
             channels: discoveryChannels,
           }),
         }),
-      );
-      setNotice(
         `正在从所选来源搜索「${discoveryQuery.trim()}」，结果会保存在本机。`,
       );
     } catch (e) {
@@ -367,7 +403,7 @@ export default function ReaderApp() {
     setNotice("");
     setError("");
     try {
-      setRun(
+      accept(
         await request<Run>("/refresh", {
           method: "POST",
           body: JSON.stringify({ limit_per_source: 10, analyze_limit: 24 }),
@@ -412,6 +448,7 @@ export default function ReaderApp() {
   function confirmedFollow(updated: View) {
     setView(updated);
     setRun(updated.run);
+    setQueue(updated.queue || []);
     setSelectedFollow(updated.confirmed_follow_id || "");
     setFollowForm(null);
     setDetail(null);
@@ -425,7 +462,7 @@ export default function ReaderApp() {
     setFollowBusy(true);
     try {
       if (action === "refresh") {
-        setRun(
+        accept(
           await request<Run>(`/follows/${follow.id}/refresh`, {
             method: "POST",
           }),
@@ -445,6 +482,7 @@ export default function ReaderApp() {
         });
         setView(updated);
         setRun(updated.run);
+        setQueue(updated.queue || []);
       }
     } catch (error) {
       setError((error as Error).message);
@@ -453,6 +491,12 @@ export default function ReaderApp() {
     }
   }
   const running = run?.state === "running";
+  const refreshRunning = running && run?.kind === "refresh";
+  const refreshQueued = queue.some((r) => r.kind === "refresh");
+  const followPending = (id?: string) =>
+    !!id &&
+    ((running && run?.follow_id === id) ||
+      queue.some((r) => r.follow_id === id));
   const {
     events,
     focus,
@@ -484,6 +528,11 @@ export default function ReaderApp() {
           {story.protected && (
             <span className="r-correction">
               重要{actionLabel[story.action]}
+            </span>
+          )}
+          {story.policy_stale && (
+            <span className="r-stale" title="整理规则已更新，这条会按新规则重新整理">
+              按旧版规则整理
             </span>
           )}
           <span className="r-card-time">{when(story.published_at)}</span>
@@ -662,11 +711,11 @@ export default function ReaderApp() {
             </button>
             <button
               className="r-refresh"
-              disabled={running || busy}
+              disabled={refreshRunning || refreshQueued || busy}
               onClick={() => void refresh()}
             >
               <Glyph name="refresh" size={16} />
-              {running ? "整理中…" : "更新情报"}
+              {refreshRunning ? "整理中…" : refreshQueued ? "已排队" : "更新情报"}
             </button>
           </div>
         </header>
@@ -786,13 +835,39 @@ export default function ReaderApp() {
               </span>
               <button
                 onClick={() =>
-                  void request("/cancel", { method: "POST" })
+                  void request("/cancel", {
+                    method: "POST",
+                    body: JSON.stringify({ id: run.id }),
+                  })
                     .then(() => load())
                     .catch((e) => setError(e.message))
                 }
               >
                 停止本次更新
               </button>
+            </div>
+          )}
+          {queue.length > 0 && (
+            <div className="r-queue" role="status" aria-label="排队中的任务">
+              <span>排队中</span>
+              {queue.map((item) => (
+                <span key={item.id}>
+                  {queueLabel(item)}
+                  <button
+                    aria-label={"取消排队：" + queueLabel(item)}
+                    onClick={() =>
+                      void request("/cancel", {
+                        method: "POST",
+                        body: JSON.stringify({ id: item.id }),
+                      })
+                        .then(() => syncStatus())
+                        .catch((e) => setError(e.message))
+                    }
+                  >
+                    取消
+                  </button>
+                </span>
+              ))}
             </div>
           )}
           {run &&
@@ -852,7 +927,6 @@ export default function ReaderApp() {
                 className="r-primary"
                 type="submit"
                 disabled={
-                  running ||
                   discoveryQuery.trim().length < 2 ||
                   !discoveryChannels.length
                 }
@@ -1159,9 +1233,11 @@ export default function ReaderApp() {
                             ? `服务运行时${intervalLabel(followed.intent_plan?.interval_minutes || 30)}检查`
                             : "自动追踪已暂停，已有内容仍保留"}{" "}
                           ·{" "}
-                          {followed.last_checked
-                            ? `最近检查 ${when(followed.last_checked)}`
-                            : "尚未执行外部检索"}
+                          {followed.last_status === "queued"
+                            ? "已排队，等待当前任务完成"
+                            : followed.last_checked
+                              ? `最近检查 ${when(followed.last_checked)}`
+                              : "尚未执行外部检索"}
                         </small>
                       </div>
                       <div className="r-follow-controls">
@@ -1181,7 +1257,7 @@ export default function ReaderApp() {
                         <button
                           className="r-primary"
                           disabled={
-                            running ||
+                            followPending(followed.id) ||
                             followBusy ||
                             !followed.active ||
                             !followed.intent_plan
@@ -1369,11 +1445,23 @@ export default function ReaderApp() {
                           </a>
                           {row.summary && <p>{row.summary}</p>}
                         </div>
-                        <span
-                          className={"r-library-status status-" + row.status}
-                        >
-                          {statusLabel[row.status] || row.status}
-                        </span>
+                        <div className="r-library-side">
+                          <span
+                            className={"r-library-status status-" + row.status}
+                            title={
+                              row.failure
+                                ? `已尝试 ${row.failure.attempts} 次（${row.failure.code}）`
+                                : undefined
+                            }
+                          >
+                            {statusLabel[row.status] || row.status}
+                          </span>
+                          {row.status === "failed" && !historical && (
+                            <button onClick={() => void retry(row.version)}>
+                              重新整理
+                            </button>
+                          )}
+                        </div>
                       </article>
                     ))}
                 </div>
@@ -1428,6 +1516,9 @@ export default function ReaderApp() {
                   detail.content_kind,
                 )}
               </span>
+              {detail.policy_stale && (
+                <span className="r-stale">按旧版规则整理，待重新整理</span>
+              )}
             </div>
             <h2>{detail.title}</h2>
             <p className="r-detail-summary">{detail.summary}</p>

@@ -3,7 +3,7 @@
 import json
 import re
 
-from .models import Assessment, now
+from .models import assessment_of, now
 from .understand import POLICY_HASH
 
 
@@ -13,14 +13,14 @@ def compare(store, reference, split="all"):
         raise ValueError("duplicate_reference_version")
     labels = [r for r in labels if split == "all" or r["split"] == split]
     decisive = [r for r in labels if r["decision"] in {"read", "skip"}]
-    judgments = store.judgments(POLICY_HASH)
+    judgments = store.judgments()
     materials = {r["version"]: store.material(r["version"]) for r in labels}
 
     def quality(row):
         raw = judgments.get(row["version"])
         if not raw:
             return None
-        a = Assessment.model_validate({k: v for k, v in raw.items() if k != "model"})
+        a = assessment_of(raw)
         score = a.significance * 3 + a.novelty * 2 + a.usefulness
         return a.relevance == "ai" and bool(a.claims) and a.evidence != "insufficient" and score >= 9
 
