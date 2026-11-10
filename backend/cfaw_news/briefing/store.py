@@ -2,59 +2,116 @@
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from .models import Interaction, Material, Preferences, digest, now
+
+CONTENT_TABLES = ("materials", "judgments")
+READER_TABLES = ("interactions", "preferences", "follows", "intent_assessments")
+
+
+def _revision_triggers(table, key):
+    return "\n".join(
+        f"CREATE TRIGGER IF NOT EXISTS {table}_{event.lower()}_revision AFTER {event} ON {table} "
+        f"BEGIN UPDATE meta SET value = value + 1 WHERE key = '{key}'; END;"
+        for event in ("INSERT", "UPDATE", "DELETE"))
+
+
+# Applied in order inside one transaction each; the file is copied before upgrading existing data.
+MIGRATIONS = [
+    (1, """
+    CREATE TABLE IF NOT EXISTS materials (
+        version TEXT PRIMARY KEY, id TEXT NOT NULL, captured_at TEXT NOT NULL,
+        data TEXT NOT NULL, UNIQUE(id, version));
+    CREATE TABLE IF NOT EXISTS judgments (
+        version TEXT NOT NULL, policy TEXT NOT NULL, data TEXT NOT NULL,
+        model TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(version, policy));
+    CREATE TABLE IF NOT EXISTS source_states (
+        id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS preferences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS interactions (
+        id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, data TEXT NOT NULL,
+        created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS snapshots (
+        id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS visits (
+        id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS follows (
+        id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS follow_drafts (
+        id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS intent_assessments (
+        plan_hash TEXT NOT NULL, version TEXT NOT NULL, data TEXT NOT NULL,
+        PRIMARY KEY(plan_hash, version));
+    """),
+    (2, """
+    CREATE INDEX IF NOT EXISTS materials_id ON materials(id);
+    CREATE INDEX IF NOT EXISTS receipts_created ON receipts(created_at);
+    CREATE INDEX IF NOT EXISTS interactions_kind ON interactions(json_extract(data, '$.kind'));
+    INSERT OR IGNORE INTO meta VALUES ('content_revision', 0), ('reader_revision', 0);
+    """ + "\n".join(_revision_triggers(t, "content_revision") for t in CONTENT_TABLES)
+        + "\n" + "\n".join(_revision_triggers(t, "reader_revision") for t in READER_TABLES)),
+]
+SCHEMA_VERSION = MIGRATIONS[-1][0]
+SNAPSHOT_KEEP, SNAPSHOT_DAYS = 60, 90
 
 
 class Store:
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.RLock()
+        self._materials = (None, [])
+        self.migrate()
+
+    def migrate(self):
+        existed = self.path.exists() and self.path.stat().st_size > 0
         with self.connection() as db:
-            db.executescript("""
-                PRAGMA journal_mode=WAL;
-                CREATE TABLE IF NOT EXISTS materials (
-                    version TEXT PRIMARY KEY, id TEXT NOT NULL, captured_at TEXT NOT NULL,
-                    data TEXT NOT NULL, UNIQUE(id, version));
-                CREATE TABLE IF NOT EXISTS judgments (
-                    version TEXT NOT NULL, policy TEXT NOT NULL, data TEXT NOT NULL,
-                    model TEXT NOT NULL, created_at TEXT NOT NULL,
-                    PRIMARY KEY(version, policy));
-                CREATE TABLE IF NOT EXISTS source_states (
-                    id TEXT PRIMARY KEY, data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS preferences (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS interactions (
-                    id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, data TEXT NOT NULL,
-                    created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS receipts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS snapshots (
-                    id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS visits (
-                    id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS follows (
-                    id TEXT PRIMARY KEY, data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS follow_drafts (
-                    id TEXT PRIMARY KEY, data TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS intent_assessments (
-                    plan_hash TEXT NOT NULL, version TEXT NOT NULL, data TEXT NOT NULL,
-                    PRIMARY KEY(plan_hash, version));
-            """)
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL)")
+            row = db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            current = row["value"] if row else 0
+            if current > SCHEMA_VERSION:
+                raise RuntimeError(f"数据库版本 {current} 比当前程序（{SCHEMA_VERSION}）新，请升级程序")
+            if existed and current < SCHEMA_VERSION:
+                backup = self.path.with_name(f"{self.path.name}.bak-v{current}")
+                if not backup.exists():
+                    target = sqlite3.connect(backup)
+                    try:
+                        db.backup(target)
+                        target.execute("PRAGMA journal_mode=DELETE")  # one self-contained file
+                    finally:
+                        target.close()
+            for version, script in MIGRATIONS:
+                if version > current:
+                    db.executescript("BEGIN;" + script + f"""
+                        INSERT OR REPLACE INTO meta VALUES ('schema_version', {version}); COMMIT;""")
 
     @contextmanager
     def connection(self):
-        db = sqlite3.connect(self.path, timeout=15)
-        try:
-            db.row_factory = sqlite3.Row
-            db.execute("PRAGMA foreign_keys=ON")
-            with db:
-                yield db
-        finally:
-            db.close()
+        with self.lock:
+            db = sqlite3.connect(self.path, timeout=15)
+            try:
+                db.row_factory = sqlite3.Row
+                db.execute("PRAGMA foreign_keys=ON")
+                with db:
+                    yield db
+            finally:
+                db.close()
+
+    def revision(self):
+        """Cheap change counters maintained by triggers, so other processes' writes count too."""
+        with self.connection() as db:
+            rows = dict(db.execute("SELECT key, value FROM meta WHERE key LIKE '%_revision'").fetchall())
+        return rows.get("content_revision", 0), rows.get("reader_revision", 0)
 
     @staticmethod
     def encoded(value):
@@ -73,16 +130,30 @@ class Store:
                                material.model_dump_json())).rowcount == 1
 
     def materials(self):
-        with self.connection() as db:
-            rows = db.execute("""SELECT data FROM (
-                SELECT data, ROW_NUMBER() OVER (PARTITION BY id ORDER BY rowid DESC) AS n
-                FROM materials) WHERE n=1""").fetchall()
-        return [Material.model_validate_json(row["data"]) for row in rows]
+        """Latest revision of each material; parsed once per content revision."""
+        revision = self.revision()[0]
+        cached_revision, cached = self._materials
+        if cached_revision != revision:
+            with self.connection() as db:
+                rows = db.execute("""SELECT data FROM (
+                    SELECT data, ROW_NUMBER() OVER (PARTITION BY id ORDER BY rowid DESC) AS n
+                    FROM materials) WHERE n=1""").fetchall()
+            cached = [Material.model_validate_json(row["data"]) for row in rows]
+            self._materials = (revision, cached)
+        return list(cached)
 
     def material(self, version):
         with self.connection() as db:
             row = db.execute("SELECT data FROM materials WHERE version=?", (version,)).fetchone()
         return Material.model_validate_json(row["data"]) if row else None
+
+    def materials_by_versions(self, versions):
+        versions = list(versions)
+        with self.connection() as db:
+            rows = [row for start in range(0, len(versions), 500) for row in db.execute(
+                f"SELECT data FROM materials WHERE version IN ({','.join('?' * len(versions[start:start + 500]))})",
+                versions[start:start + 500])]
+        return [Material.model_validate_json(row["data"]) for row in rows]
 
     def judgments(self, policy):
         with self.connection() as db:
@@ -132,10 +203,15 @@ class Store:
                        (value.request_id, fingerprint, self.encoded(payload), now()))
         return True
 
-    def interactions(self):
+    def interactions(self, kinds=None):
+        query, args = "SELECT * FROM interactions", ()
+        if kinds:
+            # Same expression as the interactions_kind index.
+            query += f" WHERE json_extract(data, '$.kind') IN ({','.join('?' * len(kinds))})"
+            args = tuple(kinds)
         with self.connection() as db:
             return [{**json.loads(r["data"]), "at": r["created_at"]}
-                    for r in db.execute("SELECT * FROM interactions ORDER BY rowid")]
+                    for r in db.execute(query + " ORDER BY rowid", args)]
 
     def receipt(self, value):
         with self.connection() as db:
@@ -183,8 +259,12 @@ class Store:
 
     def snapshot(self, value):
         key = digest([now(), value])[:24]
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_DAYS)).isoformat()
         with self.connection() as db:
             db.execute("INSERT INTO snapshots VALUES (?, ?, ?)", (key, self.encoded(value), now()))
+            # Keep the newest SNAPSHOT_KEEP, and anything younger than SNAPSHOT_DAYS.
+            db.execute("""DELETE FROM snapshots WHERE created_at < ? AND rowid NOT IN (
+                SELECT rowid FROM snapshots ORDER BY rowid DESC LIMIT ?)""", (cutoff, SNAPSHOT_KEEP))
         return key
 
     def follows(self):
