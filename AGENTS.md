@@ -9,6 +9,6 @@
 - Preserve `data/archive/articles.json`, `data/sources.json` and `docs/provenance/` (migration provenance). Publisher statements, reported tests, opinions, search excerpts and model explanations are different evidence types.
 - Keep credentials and local user data out of Git. Do not read or copy another project's credentials.
 - Development diaries belong in `dev-diaries/` and must remain local. Never stage, force-add, commit, push, or upload that directory or its contents; preserve its root `.gitignore` rule.
-- Keep validation proportional: default pytest covers `tests_reader/`; `scripts/verify.ps1` is the normal local check. Run Ruff, frontend tests and the frontend build for relevant changes. Prefer a small real-material comparison over duplicate sealing/control scripts (user request, 2026-11-07).
+- Keep validation proportional: default pytest covers `tests_reader/`; `scripts/verify.ps1` is the normal local check. Run Ruff, frontend tests (`npm test`, pure logic in `frontend/src/reader/`) and the frontend build for relevant changes. The version lives only in `backend/cfaw_news/__init__.py`. Prefer a small real-material comparison over duplicate sealing/control scripts (user request, 2026-11-07).
 - Frontend `dist` is generated. Change source and rebuild.
 - API is a local single-user starter. Do not claim authentication, production deployment, durable checkpoints, vector retrieval or algorithm gains before implementing and verifying them.

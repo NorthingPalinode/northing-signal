@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import __version__
 from .models import (
     TOPICS,
     ConfirmFollow,
@@ -34,7 +35,7 @@ def create_app(settings=None, store=None):
         yield
         await service.close()
 
-    app = FastAPI(title="CFAW News · AI 简报", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="CFAW News · AI 简报", version=__version__, lifespan=lifespan)
     app.state.content = service
 
     @app.middleware("http")
@@ -57,7 +58,7 @@ def create_app(settings=None, store=None):
 
     @app.get("/api/health")
     async def health():
-        return {"status": "ok", "version": "0.3.0", "engine": "content-v1"}
+        return {"status": "ok", "version": __version__, "engine": "content-v1"}
 
     @app.get("/api/reader")
     async def reader():
