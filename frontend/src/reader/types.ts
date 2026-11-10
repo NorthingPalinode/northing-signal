@@ -163,4 +163,4 @@ export type View = {
   saved_events?: Story[];
   confirmed_follow_id?: string;
 };
-export type Page = "briefing" | "discover" | "following" | "library";
+export type Page = "briefing" | "discover" | "following" | "saved" | "library";

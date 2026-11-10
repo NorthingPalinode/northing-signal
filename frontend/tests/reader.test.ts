@@ -33,6 +33,7 @@ const view = (events: Story[], changes: Partial<View> = {}): View => ({
 test("unknown or empty hashes open the briefing page", () => {
   assert.equal(pageFromHash("#following"), "following");
   assert.equal(pageFromHash("library"), "library");
+  assert.equal(pageFromHash("#saved"), "saved");
   assert.equal(pageFromHash(""), "briefing");
   assert.equal(pageFromHash("#settings"), "briefing");
 });
@@ -52,6 +53,12 @@ test("news is newest first within each section and respects filters", () => {
   assert.deepEqual(value.events.map((e) => e.id), ["a", "d", "b", "c"]);
   assert.deepEqual(sections(value, "agents", "", "").focus, []);
   assert.deepEqual(sections(value, "", "ATLAS C", "").focus.map((e) => e.id), ["c"]);
+});
+
+test("more lists qualified stories outside focus and radar", () => {
+  const events = [story("a"), story("b"), story("c"), story("d", { qualified: false }), story("e", { dismissed: true })];
+  const value = view(events, { focus: ["a"], radar: ["b"] });
+  assert.deepEqual(sections(value, "", "", "").more.map((e) => e.id), ["c"]);
 });
 
 test("discover hides unqualified and dismissed stories", () => {

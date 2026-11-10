@@ -12,7 +12,7 @@ export const topics: Record<Topic, string> = {
 
 export function pageFromHash(hash: string): Page {
   const value = hash.replace(/^#/, "");
-  return ["discover", "following", "library"].includes(value)
+  return ["discover", "following", "saved", "library"].includes(value)
     ? (value as Page)
     : "briefing";
 }
@@ -84,7 +84,8 @@ export const statusLabel: Record<string, string> = {
 export const matchesStory = (story: Story, topic: string, query: string) =>
   (!topic || story.topic === topic) &&
   (!query ||
-    (story.title + story.summary + story.source)
+    [story.title, story.summary, story.source, story.reason, story.topic_label, story.object]
+      .join(" ")
       .toLowerCase()
       .includes(query.toLowerCase()));
 
@@ -105,6 +106,14 @@ export function sections(
     focus: events.filter((e) => view?.focus.includes(e.id)),
     radar: events.filter((e) => view?.radar.includes(e.id)),
     discover: events.filter((e) => e.qualified && !e.dismissed),
+    /** Qualified stories the briefing did not already show as focus or radar. */
+    more: events.filter(
+      (e) =>
+        e.qualified &&
+        !e.dismissed &&
+        !view?.focus.includes(e.id) &&
+        !view?.radar.includes(e.id),
+    ),
     follows,
     followed,
     saved: newestFirst(saved.filter(matches)),
@@ -130,7 +139,7 @@ export function feedbackNotice(kind: string, wasSaved: boolean) {
     : kind === "saved"
       ? wasSaved
         ? "已取消收藏。"
-        : "已收藏，可在「关注 → 我的收藏」中找到。"
+        : "已收藏，可在「收藏」中找到。"
       : kind === "useful"
         ? "已记录，下次整理会参考你的反馈。"
         : "已记录，这条内容将减少推荐。";
