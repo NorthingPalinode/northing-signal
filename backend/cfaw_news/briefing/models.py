@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -15,10 +16,26 @@ TOPICS = {
     "engineering": "部署与成本", "products": "产品与应用", "industry": "产业与政策",
 }
 POLICY = "content-v1"
+# Raise only when a change should invalidate earlier judgments (e.g. new scoring rules).
+# Rewording the prompt alone keeps them; older epochs stay visible, marked, until re-judged.
+POLICY_EPOCH = 1
+JUDGMENT_META = ("model", "epoch")
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def day_start(timezone_name=""):
+    """Start of today in the reader's timezone (system local when empty), as a UTC ISO string."""
+    zone = ZoneInfo(timezone_name) if timezone_name else None
+    local = datetime.now(timezone.utc).astimezone(zone)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc).isoformat()
+
+
+def assessment_of(judgment):
+    """A stored judgment row without its storage metadata."""
+    return Assessment.model_validate({k: v for k, v in judgment.items() if k not in JUDGMENT_META})
 
 
 def digest(value):
@@ -129,6 +146,10 @@ class Interaction(Contract):
 class RefreshRequest(Contract):
     limit_per_source: int = Field(default=10, ge=1, le=20)
     analyze_limit: int = Field(default=24, ge=0, le=120)
+
+
+class CancelRequest(Contract):
+    id: str | None = Field(default=None, max_length=64)
 
 
 class VisitRequest(Contract):

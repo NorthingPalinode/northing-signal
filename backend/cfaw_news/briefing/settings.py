@@ -2,8 +2,9 @@
 
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -21,6 +22,21 @@ class ReaderSettings(BaseSettings):
     llm_thinking: Literal["provider_default", "enabled", "disabled"] = "provider_default"
     reader_requests_per_day: int | None = Field(default=None, ge=0)
     reader_tokens_per_day: int | None = Field(default=None, ge=0)
+    # IANA name such as Asia/Shanghai; empty uses the system timezone. Sets when the daily budget resets.
+    reader_timezone: str = ""
+    reader_batch_size: int = Field(default=4, ge=1, le=6)
+    reader_follow_analyze_limit: int = Field(default=6, ge=1, le=24)
+    reader_model_concurrency: int = Field(default=1, ge=1, le=4)
     reader_web_api_key: SecretStr = SecretStr("")
     reader_openalex_api_key: SecretStr = SecretStr("")
     reader_x_bearer_token: SecretStr = SecretStr("")
+
+    @field_validator("reader_timezone")
+    @classmethod
+    def known_timezone(cls, value):
+        if value:
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError(f"未知时区：{value}（示例：Asia/Shanghai）") from None
+        return value

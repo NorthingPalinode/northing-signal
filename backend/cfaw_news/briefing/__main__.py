@@ -5,33 +5,21 @@ import asyncio
 import json
 from pathlib import Path
 
+from .models import day_start
 from .service import ContentService
 from .settings import ReaderSettings
 from .store import Store
 
 
 async def analyze_pending(service, limit, reference=None):
-    from .understand import POLICY_HASH, has_material
-    store = service.store
-    old = store.judgments(POLICY_HASH)
-    candidates = sorted((m for m in store.materials() if m.version not in old and has_material(m)),
-                        key=lambda m: m.published_at or m.captured_at, reverse=True)[:limit]
+    """Same selection, batching and backoff as an in-app update, without collecting."""
+    candidates = sorted(service.store.materials(), key=lambda m: m.published_at or m.captured_at, reverse=True)
     if reference:
         versions = {json.loads(line)["version"] for line in reference.read_text("utf-8").splitlines() if line.strip()}
-        candidates = [m for m in store.materials() if m.version not in old and m.version in versions and has_material(m)][:limit]
-    for start in range(0, len(candidates), 2):
-        batch = candidates[start:start + 2]
-        try:
-            result = await service.analyzer.batch(batch)
-            for version, value in result.items():
-                store.judge(version, POLICY_HASH, value, service.settings.llm_model)
-            print(json.dumps({"attempted": start + len(batch), "accepted": len(result),
-                              "failed": len(batch) - len(result), "total": len(candidates),
-                              "titles": [v["title"] for v in result.values()]}, ensure_ascii=False), flush=True)
-        except ValueError as error:
-            print(json.dumps({"attempted": start, "error": str(error)}, ensure_ascii=False), flush=True)
-            if str(error) == "daily_model_budget_reached":
-                break
+        candidates = [m for m in candidates if m.version in versions]
+    run = service.new_run("analyze", "understanding")
+    await service.analyze(candidates, run, limit)
+    print(json.dumps({k: run.get(k) for k in ("total", "analyzed", "failed", "errors")}, ensure_ascii=False), flush=True)
 
 
 def main():
@@ -49,6 +37,8 @@ def main():
     store = Store(args.database or settings.root / ".local/briefing-v2.db")
     if args.command == "evaluate":
         from .evaluate import compare
+        from .understand import POLICY_HASH
+        store.adopt_policy(POLICY_HASH)
         if not args.reference:
             parser.error("evaluate requires --reference")
         print(json.dumps(compare(store, args.reference, args.split), ensure_ascii=False, indent=2))
@@ -63,7 +53,7 @@ def main():
         from .understand import POLICY_HASH, validate
         path = settings.root / ".local/reader-quality/failed_outputs.jsonl"
         recovered = 0
-        old = store.judgments(POLICY_HASH)
+        old = store.judgments()
         for line in path.read_text("utf-8").splitlines() if path.exists() else []:
             for item in json.loads(line)["items"]:
                 material = store.material(item["id"])
@@ -96,7 +86,8 @@ def main():
                       "source_health": {"ok": sum(s["state"]["status"] == "ok" for s in view["sources"]),
                                         "total": len(view["sources"]),
                                         "unavailable": [s["name"] for s in view["sources"] if s["state"]["status"] == "error"]},
-                      "receipts": len(store.receipts_today())}, ensure_ascii=False), flush=True)
+                      "receipts": len(store.receipts_today(day_start(settings.reader_timezone)))},
+                     ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

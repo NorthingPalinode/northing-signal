@@ -6,10 +6,12 @@ import {
   feedbackNotice,
   followSeed,
   pageFromHash,
+  queueLabel,
   sections,
+  statusLabel,
   when,
 } from "../src/reader/logic.ts";
-import type { Story, View } from "../src/reader/types.ts";
+import type { Run, Story, View } from "../src/reader/types.ts";
 
 const story = (id: string, changes: Partial<Story> = {}): Story => ({
   id, version: id + "-v1", title: "Atlas " + id, summary: "summary", reason: "", topic: "models",
@@ -93,4 +95,16 @@ test("invalid dates are labelled instead of rendered", () => {
   assert.equal(when(null), "时间未确认");
   assert.equal(when("not a date"), "时间未确认");
   assert.notEqual(when("2026-11-01T08:00:00Z"), "时间未确认");
+});
+
+test("queued jobs and failed materials have readable labels", () => {
+  const run = (changes: Partial<Run>): Run => ({
+    id: "r", state: "queued", stage: "discovering", sources_done: 0, analyzed: 0, failed: 0,
+    errors: [], ...changes,
+  });
+  assert.equal(queueLabel(run({ kind: "refresh" })), "更新情报");
+  assert.equal(queueLabel(run({ kind: "discovery", query: "vLLM" })), "搜索「vLLM」");
+  assert.equal(queueLabel(run({ kind: "following", follow_name: "本地智能体" })), "追踪「本地智能体」");
+  assert.equal(statusLabel.failed, "整理失败");
+  assert.match(statusLabel.retrying, /稍后重试/);
 });

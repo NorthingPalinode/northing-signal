@@ -22,13 +22,21 @@ def legacy_database(path):
                    (item.version, item.id, item.captured_at, item.model_dump_json()))
         db.execute("INSERT INTO judgments VALUES (?, ?, ?, ?, ?)",
                    (item.version, POLICY_HASH, assessment().model_dump_json(), "fixture", item.captured_at))
+        # Written by an earlier prompt: kept, but never shown as a current judgment.
+        db.execute("INSERT INTO judgments VALUES (?, ?, ?, ?, ?)",
+                   (item.version, "older-prompt", assessment(title="旧规则标题").model_dump_json(), "fixture",
+                    item.captured_at))
         db.execute("INSERT INTO follows VALUES ('f1', '{\"id\": \"f1\", \"active\": false}')")
     return item
 
 
+# Columns every schema version has; later migrations may add more.
+COLUMNS = {"judgments": "version, policy, data, model, created_at"}
+
+
 def dump(path, tables):
     with sqlite3.connect(path) as db:
-        return {t: db.execute(f"SELECT * FROM {t} ORDER BY rowid").fetchall() for t in tables}
+        return {t: db.execute(f"SELECT {COLUMNS.get(t, '*')} FROM {t} ORDER BY rowid").fetchall() for t in tables}
 
 
 def test_existing_database_is_backed_up_and_upgraded_without_changing_rows(tmp_path):
@@ -42,6 +50,11 @@ def test_existing_database_is_backed_up_and_upgraded_without_changing_rows(tmp_p
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == SCHEMA_VERSION
     assert [m.version for m in store.materials()] == [item.version]
+    # Old rows wait for the running policy to adopt them; other prompts' rows stay hidden.
+    assert store.judgments() == {}
+    store.adopt_policy(POLICY_HASH)
+    judgment = store.judgments()[item.version]
+    assert judgment["epoch"] == 1 and judgment["title"] == assessment().title
     # Reopening an up-to-date database neither migrates again nor writes another backup.
     Store(path)
     assert sorted(p.name for p in tmp_path.iterdir() if ".bak-" in p.name) == ["reader.db.bak-v0"]

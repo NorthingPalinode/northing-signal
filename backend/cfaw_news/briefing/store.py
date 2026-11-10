@@ -8,9 +8,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .models import Interaction, Material, Preferences, digest, now
+from .models import POLICY_EPOCH, Interaction, Material, Preferences, digest, now
 
-CONTENT_TABLES = ("materials", "judgments")
+CONTENT_TABLES = ("materials", "judgments")  # judgment_failures joins in migration 3
 READER_TABLES = ("interactions", "preferences", "follows", "intent_assessments")
 
 
@@ -59,9 +59,31 @@ MIGRATIONS = [
     INSERT OR IGNORE INTO meta VALUES ('content_revision', 0), ('reader_revision', 0);
     """ + "\n".join(_revision_triggers(t, "content_revision") for t in CONTENT_TABLES)
         + "\n" + "\n".join(_revision_triggers(t, "reader_revision") for t in READER_TABLES)),
+    # Judgments gain an epoch (rows start at 0 until the running policy adopts them), and
+    # failed judgments get a backoff ledger. Rebuilding judgments drops its triggers: re-create.
+    (3, """
+    CREATE TABLE judgments_v3 (
+        version TEXT NOT NULL, policy TEXT NOT NULL, epoch INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL, model TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(version, policy, epoch));
+    INSERT INTO judgments_v3 (version, policy, epoch, data, model, created_at)
+        SELECT version, policy, 0, data, model, created_at FROM judgments ORDER BY rowid;
+    DROP TABLE judgments;
+    ALTER TABLE judgments_v3 RENAME TO judgments;
+    CREATE INDEX judgments_version ON judgments(version);
+    CREATE TABLE judgment_failures (
+        version TEXT NOT NULL, epoch INTEGER NOT NULL, data TEXT NOT NULL,
+        PRIMARY KEY(version, epoch));
+    """ + _revision_triggers("judgments", "content_revision")
+        + "\n" + _revision_triggers("judgment_failures", "content_revision")),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 SNAPSHOT_KEEP, SNAPSHOT_DAYS = 60, 90
+# A material that fails judgment waits 1 h, then 6 h; the third failure stops automatic retries.
+# Quote/number mismatches tend to repeat with the same prompt, so they start at the second step.
+RETRY_DELAYS = (3600, 6 * 3600)
+MAX_ATTEMPTS = len(RETRY_DELAYS) + 1
+CONTENT_FAILURES = {"quote_not_in_original", "unsupported_number", "condition_not_in_original"}
 
 
 class Store:
@@ -155,15 +177,53 @@ class Store:
                 versions[start:start + 500])]
         return [Material.model_validate_json(row["data"]) for row in rows]
 
-    def judgments(self, policy):
+    def judgments(self):
+        """Newest adopted judgment per material version (highest epoch, then latest written)."""
         with self.connection() as db:
-            rows = db.execute("SELECT version, data, model FROM judgments WHERE policy=?", (policy,)).fetchall()
-        return {r["version"]: {**json.loads(r["data"]), "model": r["model"]} for r in rows}
+            rows = db.execute("""SELECT version, data, model, epoch FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY version ORDER BY epoch DESC, rowid DESC) AS n
+                FROM judgments WHERE epoch > 0) WHERE n=1""").fetchall()
+        return {r["version"]: {**json.loads(r["data"]), "model": r["model"], "epoch": r["epoch"]} for r in rows}
 
-    def judge(self, version, policy, value, model):
+    def judge(self, version, policy, value, model, epoch=None):
+        epoch = POLICY_EPOCH if epoch is None else epoch
         with self.connection() as db:
-            db.execute("INSERT OR IGNORE INTO judgments VALUES (?, ?, ?, ?, ?)",
-                       (version, policy, self.encoded(value), model, now()))
+            db.execute("""INSERT OR IGNORE INTO judgments (version, policy, epoch, data, model, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?)""", (version, policy, epoch, self.encoded(value), model, now()))
+            db.execute("DELETE FROM judgment_failures WHERE version=? AND epoch<=?", (version, epoch))
+
+    def adopt_policy(self, policy, epoch=None):
+        """Judgments written before epochs existed count for the policy that wrote them."""
+        epoch = POLICY_EPOCH if epoch is None else epoch
+        with self.connection() as db:
+            db.execute("UPDATE judgments SET epoch=? WHERE policy=? AND epoch=0", (epoch, policy))
+
+    def record_failure(self, version, code, epoch=None):
+        epoch = POLICY_EPOCH if epoch is None else epoch
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM judgment_failures WHERE version=? AND epoch=?",
+                             (version, epoch)).fetchone()
+            attempts = (json.loads(row["data"])["attempts"] if row else 0) + 1
+            if code in CONTENT_FAILURES:
+                attempts = max(attempts, 2)
+            gave_up = attempts >= MAX_ATTEMPTS
+            retry_at = None if gave_up else (
+                datetime.now(timezone.utc) + timedelta(seconds=RETRY_DELAYS[attempts - 1])).isoformat()
+            value = {"attempts": attempts, "code": code, "at": now(), "retry_at": retry_at, "gave_up": gave_up}
+            db.execute("INSERT OR REPLACE INTO judgment_failures VALUES (?, ?, ?)",
+                       (version, epoch, self.encoded(value)))
+        return value
+
+    def failures(self, epoch=None):
+        epoch = POLICY_EPOCH if epoch is None else epoch
+        with self.connection() as db:
+            return {r["version"]: json.loads(r["data"]) for r in db.execute(
+                "SELECT version, data FROM judgment_failures WHERE epoch=?", (epoch,))}
+
+    def clear_failure(self, version):
+        with self.connection() as db:
+            return db.execute("DELETE FROM judgment_failures WHERE version=?", (version,)).rowcount > 0
 
     def source_state(self, source_id, value):
         with self.connection() as db:
@@ -217,11 +277,12 @@ class Store:
         with self.connection() as db:
             db.execute("INSERT INTO receipts(data, created_at) VALUES (?, ?)", (self.encoded(value), now()))
 
-    def reserve_request(self, value, requests_limit, tokens_limit):
+    def reserve_request(self, value, requests_limit, tokens_limit, since=None):
+        """since: start of the accounting day as a UTC ISO string (default: the UTC day)."""
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             rows = ([json.loads(r["data"]) for r in db.execute(
-                "SELECT data FROM receipts WHERE created_at >= ?", (now()[:10],))]
+                "SELECT data FROM receipts WHERE created_at >= ?", (since or now()[:10],))]
                 if requests_limit is not None or tokens_limit is not None else [])
             if ((requests_limit is not None and len(rows) >= requests_limit)
                     or (tokens_limit is not None and
@@ -252,9 +313,9 @@ class Store:
             return [{"id": r["id"], "created_at": r["created_at"]}
                     for r in db.execute("SELECT id, created_at FROM snapshots ORDER BY rowid DESC LIMIT 20")]
 
-    def receipts_today(self):
+    def receipts_today(self, since=None):
         with self.connection() as db:
-            rows = db.execute("SELECT data FROM receipts WHERE created_at >= ?", (now()[:10],)).fetchall()
+            rows = db.execute("SELECT data FROM receipts WHERE created_at >= ?", (since or now()[:10],)).fetchall()
         return [json.loads(r["data"]) for r in rows]
 
     def snapshot(self, value):

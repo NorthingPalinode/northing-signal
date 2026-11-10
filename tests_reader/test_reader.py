@@ -273,7 +273,7 @@ def test_cancel_stops_before_judgment_publication(tmp_path, monkeypatch):
         await entered.wait()
         await service.cancel()
         assert service.run["state"] == "cancelled"
-        assert not store.judgments("any")
+        assert not store.judgments()
     asyncio.run(scenario())
 
 
@@ -373,7 +373,6 @@ def test_saved_version_survives_unprocessed_revision_and_api_unfollow(tmp_path):
 def test_cancelling_follow_does_not_publish_late_model_output(tmp_path, monkeypatch):
     from cfaw_news.briefing.models import ConfirmFollow
     from cfaw_news.briefing.service import ContentService
-    from cfaw_news.briefing.understand import POLICY_HASH
     async def scenario():
         store = Store(tmp_path / "cancel-follow.db")
         draft = store.create_follow_draft("追踪本地智能体的实现、代码和具体评估。", intent_plan())
@@ -396,7 +395,7 @@ def test_cancelling_follow_does_not_publish_late_model_output(tmp_path, monkeypa
         service.start_follow(follow["id"])
         await entered.wait()
         await service.cancel()
-        assert not store.judgments(POLICY_HASH)
+        assert not store.judgments()
         assert store.follows()[0]["last_status"] == "cancelled"
         await service.close()
     asyncio.run(scenario())
