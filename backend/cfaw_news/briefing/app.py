@@ -1,4 +1,4 @@
-"""Standalone local AI reader. Runtime does not import the old intelligence/evals chain."""
+"""Standalone local AI reader."""
 
 from contextlib import asynccontextmanager
 from pathlib import Path

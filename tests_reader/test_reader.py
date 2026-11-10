@@ -10,9 +10,9 @@ from cfaw_news.briefing.app import create_app
 from cfaw_news.briefing.collect import parse
 from cfaw_news.briefing.engine import active_actions, project
 from cfaw_news.briefing.models import Assessment, Interaction, Material, Preferences
+from cfaw_news.briefing.settings import ReaderSettings as Settings
 from cfaw_news.briefing.store import Store
 from cfaw_news.briefing.understand import Analyzer, grounded, validate, validate_numbers
-from cfaw_news.config import Settings
 
 
 def settings(**changes):

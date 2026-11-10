@@ -1,57 +1,13 @@
 * text=auto eol=lf
 *.jpg binary
-# Preserve the exact migrated bytes recorded in the provenance manifest.
+# Preserve the exact migrated bytes recorded in docs/provenance/migration-manifest.json.
 data/archive/articles.json -text
 data/sources.json -text
 frontend/public/icon.svg -text
 LICENSE -text
 docs/provenance/legacy-NOTICE.txt -text whitespace=cr-at-eol
-# Frozen G0 fingerprints describe these exact bytes, including their line endings.
-audit/G0_BASELINE.json -text whitespace=cr-at-eol
-audit/G0_SCHEMA.sql -text whitespace=cr-at-eol,-blank-at-eof
-# G1 manifests hash exact bundle bytes; Git must not normalize their line endings.
-evals/intelligence_v1/** -text whitespace=cr-at-eol
-# Preserve existing local source/provenance bytes used by frozen fingerprints.
-backend/cfaw_news/media.py -text whitespace=cr-at-eol
 docs/provenance/migration-manifest.json -text whitespace=cr-at-eol
-frontend/src/App.tsx -text whitespace=cr-at-eol
-frontend/src/NewsLibrary.tsx -text whitespace=cr-at-eol
-frontend/src/styles.css -text whitespace=cr-at-eol
+# Existing Windows line endings; keep them stable for local PowerShell users.
 requirements.lock -text whitespace=cr-at-eol
 scripts/start.ps1 -text whitespace=cr-at-eol
 scripts/verify.ps1 -text whitespace=cr-at-eol
-# G2 versioned schemas, synthetic fixtures and configuration pins describe exact bytes.
-evals/intelligence_g2/schema/** -text
-evals/intelligence_g2/fixtures/** -text
-evals/intelligence_g2/manifests/** -text
-
-# G2 source/test and report fingerprints are exact-byte release evidence.
-evals/intelligence_g2/*.py -text whitespace=cr-at-eol
-evals/intelligence_g2/pr?/*.py -text whitespace=cr-at-eol
-evals/intelligence_g2/*.md -text whitespace=cr-at-eol
-evals/intelligence_g2/reports/*.md -text whitespace=cr-at-eol
-tests/evals/g2/**/*.py -text whitespace=cr-at-eol
-docs/G2_G3_HANDOFF.md -text whitespace=cr-at-eol
-docs/plans/G2_IMPLEMENTATION_PLAN.md -text whitespace=cr-at-eol,-blank-at-eol
-
-# G3 input/config/schema and test inventory pins bind exact working-tree bytes.
-evals/intelligence_g3/** -text whitespace=cr-at-eol
-tests/evals/g3/** -text whitespace=cr-at-eol
-
-# G4 contracts, schemas and required-test manifests bind exact working-tree bytes.
-evals/intelligence_g4/** -text whitespace=cr-at-eol
-# G4 QA manifests and source snapshots bind exact audited bytes across checkouts.
-audit/G4_*MANIFEST.json -text whitespace=cr-at-eol
-audit/g4/pr5/** -text whitespace=cr-at-eol
-audit/g4/pr6/** -text whitespace=cr-at-eol
-audit/g4/h09/** -text whitespace=cr-at-eol
-audit/g4/h09_review/** -text whitespace=cr-at-eol
-backend/cfaw_news/intelligence/runtime_schema.py -text whitespace=cr-at-eol
-# Preserve licensed upstream text and the exact reviewed UI snapshot whitespace.
-audit/g4/pr6/samples/** whitespace=-blank-at-eol,-blank-at-eof
-frontend/src/BriefingHome.tsx whitespace=-blank-at-eol
-# Preserve the exact generated SQLAlchemy DDL, including emitted trailing spaces.
-audit/g4/pr4/SCHEMA.sql -text whitespace=-blank-at-eol
-# Existing G4 plans use Markdown hard breaks; preserve their reviewed bytes.
-docs/G4_IMPLEMENTATION_PLAN.md -text whitespace=cr-at-eol,-blank-at-eol
-docs/CODEX_G4_EXECUTION_PROMPT.md -text whitespace=cr-at-eol,-blank-at-eol

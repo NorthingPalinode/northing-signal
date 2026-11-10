@@ -1,4 +1,4 @@
-"""Reader-only settings. Existing project model configuration can be reused."""
+"""Reader settings, read from the project .env."""
 
 from pathlib import Path
 from typing import Literal

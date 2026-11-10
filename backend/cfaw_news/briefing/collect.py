@@ -11,8 +11,8 @@ from urllib.parse import urljoin, urlsplit
 import feedparser
 import httpx
 
-from ..media import OriginTLS, connection_addresses, public_document
 from .models import Material, digest, now, public_url
+from .net import OriginTLS, connection_addresses, public_document
 
 ARXIV_GATES = weakref.WeakKeyDictionary()
 
