@@ -17,17 +17,31 @@ export function pageFromHash(hash: string): Page {
     : "briefing";
 }
 
-export const when = (value?: string | null) => {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime())
-    ? new Intl.DateTimeFormat("zh-CN", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(date)
-    : "时间未确认";
-};
+export function when(value?: string | null, capturedAt?: string) {
+  const published = Date.parse(value ?? "");
+  const hasPublished = Number.isFinite(published);
+  const date = hasPublished ? published : Date.parse(capturedAt ?? "");
+  if (!Number.isFinite(date)) return "时间未确认";
+  const label = new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+  return hasPublished ? label : `收录于 ${label}`;
+}
+
+type NewsDate = { published_at: string | null; captured_at?: string };
+
+function newestFirst<T extends NewsDate>(rows: T[]): T[] {
+  const time = (row: NewsDate) => {
+    const published = Date.parse(row.published_at ?? "");
+    if (Number.isFinite(published)) return published;
+    const captured = Date.parse(row.captured_at ?? "");
+    return Number.isFinite(captured) ? captured : Number.MIN_SAFE_INTEGER;
+  };
+  return [...rows].sort((a, b) => time(b) - time(a));
+}
 export const evidence = (value: string, role?: string, kind?: string) =>
   kind === "benchmark_snapshot"
     ? "公开榜单数据"
@@ -82,7 +96,8 @@ export function sections(
   selectedFollow: string,
 ) {
   const matches = (e: Story) => matchesStory(e, topic, query);
-  const events = view?.events.filter(matches) || [];
+  const events = newestFirst(view?.events.filter(matches) || []);
+  const saved = view?.saved_events || view?.events.filter((e) => e.saved) || [];
   const follows = view?.follows || [];
   const followed = follows.find((f) => f.id === selectedFollow) || follows[0];
   return {
@@ -92,8 +107,9 @@ export function sections(
     discover: events.filter((e) => e.qualified && !e.dismissed),
     follows,
     followed,
-    saved: (view?.saved_events || view?.events.filter((e) => e.saved) || []).filter(matches),
+    saved: newestFirst(saved.filter(matches)),
     followingEvents: events.filter((e) => followed?.event_ids.includes(e.id)),
+    archive: newestFirst(view?.archive || []),
     okSources: view?.sources.filter((s) => s.state.status === "ok").length || 0,
   };
 }
@@ -131,9 +147,7 @@ export function queueLabel(run: Run) {
 
 /** Events a reader may fold this one into: same topic, newest first. */
 export function mergeCandidates(view: View | null, story: Story, limit = 30) {
-  const time = (e: Story) => Date.parse(e.published_at || e.captured_at) || 0;
-  return (view?.events || [])
-    .filter((e) => e.id !== story.id && e.topic === story.topic)
-    .sort((a, b) => time(b) - time(a))
-    .slice(0, limit);
+  return newestFirst(
+    (view?.events || []).filter((e) => e.id !== story.id && e.topic === story.topic),
+  ).slice(0, limit);
 }

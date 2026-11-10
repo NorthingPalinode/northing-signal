@@ -125,6 +125,7 @@ export type Archive = {
   source: string;
   url: string;
   published_at: string | null;
+  captured_at?: string;
   summary?: string;
   /** pending | retrying | failed | ai | unrelated | uncertain | time_uncertain */
   status: string;

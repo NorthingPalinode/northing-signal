@@ -37,12 +37,19 @@ test("unknown or empty hashes open the briefing page", () => {
   assert.equal(pageFromHash("#settings"), "briefing");
 });
 
-test("focus and radar keep the server's ranking and respect filters", () => {
-  const events = [story("a"), story("b", { topic: "agents" }), story("c")];
-  const value = view(events, { focus: ["c", "a"], radar: ["b"] });
+test("news is newest first within each section and respects filters", () => {
+  const earlier = story("a", { published_at: "2026-11-02T10:00:00+08:00", captured_at: "2026-11-10T00:00:00Z" });
+  const later = story("c", { published_at: "unconfirmed", captured_at: "2026-11-02T03:00:00Z" });
+  const latest = story("b", { topic: "agents", published_at: "2026-11-02T04:00:00Z" });
+  const undated = story("d", { captured_at: "unconfirmed" });
+  const events = [earlier, undated, latest, later];
+  const value = view(events, { focus: ["a", "c"], radar: ["d", "b"], saved_events: [earlier, later] });
   const all = sections(value, "", "", "");
-  assert.deepEqual(all.focus.map((e) => e.id), ["a", "c"]);
-  assert.deepEqual(all.radar.map((e) => e.id), ["b"]);
+  assert.deepEqual(all.focus.map((e) => e.id), ["c", "a"]);
+  assert.deepEqual(all.radar.map((e) => e.id), ["b", "d"]);
+  assert.deepEqual(all.discover.map((e) => e.id), ["b", "c", "a", "d"]);
+  assert.deepEqual(all.saved.map((e) => e.id), ["c", "a"]);
+  assert.deepEqual(value.events.map((e) => e.id), ["a", "d", "b", "c"]);
   assert.deepEqual(sections(value, "agents", "", "").focus, []);
   assert.deepEqual(sections(value, "", "ATLAS C", "").focus.map((e) => e.id), ["c"]);
 });
@@ -96,6 +103,8 @@ test("invalid dates are labelled instead of rendered", () => {
   assert.equal(when(null), "时间未确认");
   assert.equal(when("not a date"), "时间未确认");
   assert.notEqual(when("2026-11-01T08:00:00Z"), "时间未确认");
+  const captured = "2026-11-01T08:00:00Z";
+  assert.equal(when(null, captured), `收录于 ${when(captured)}`);
 });
 
 test("queued jobs and failed materials have readable labels", () => {

@@ -517,7 +517,6 @@ export default function ReaderApp() {
     ((running && run?.follow_id === id) ||
       queue.some((r) => r.follow_id === id));
   const {
-    events,
     focus,
     radar,
     discover,
@@ -525,6 +524,7 @@ export default function ReaderApp() {
     followed,
     saved,
     followingEvents,
+    archive,
     okSources,
   } = sections(view, topic, query, selectedFollow);
 
@@ -554,7 +554,9 @@ export default function ReaderApp() {
               按旧版规则整理
             </span>
           )}
-          <span className="r-card-time">{when(story.published_at)}</span>
+          <span className="r-card-time">
+            {when(story.published_at, story.captured_at)}
+          </span>
           {page === "following" &&
             followingTab === "topics" &&
             followed?.unread_ids.includes(story.id) && (
@@ -983,7 +985,7 @@ export default function ReaderApp() {
                     : "已有判断直接沿用，材料不足或未完成的条目保留为原始线索。"}
                 </p>
                 <ul>
-                  {view?.archive
+                  {view && archive
                     .filter((row) => run.result_versions?.includes(row.version))
                     .map((row) => {
                       const story = view.events.find((event) =>
@@ -1128,6 +1130,7 @@ export default function ReaderApp() {
                           <h3>{story.title}</h3>
                           <p>{story.summary}</p>
                           <small>
+                            {when(story.published_at, story.captured_at)} ·{" "}
                             {story.source} ·{" "}
                             {evidence(
                               story.evidence,
@@ -1149,7 +1152,7 @@ export default function ReaderApp() {
                 <h2>
                   <span>↗</span>值得探索
                 </h2>
-                <small>{discover.length} 项 · 以内容价值整理</small>
+                <small>{discover.length} 项 · 最新在前</small>
               </div>
               <div className="r-cards">{discover.map(card)}</div>
               {!discover.length && (
@@ -1377,7 +1380,7 @@ export default function ReaderApp() {
                           {followed.material_versions.length}
                         </summary>
                         <ul>
-                          {view.archive
+                          {archive
                             .filter((row) =>
                               followed.material_versions.includes(row.version),
                             )
@@ -1438,7 +1441,7 @@ export default function ReaderApp() {
               </div>
               {
                 <div className="r-library">
-                  {view.archive
+                  {archive
                     .filter(
                       (row) =>
                         (!query ||
@@ -1456,7 +1459,7 @@ export default function ReaderApp() {
                       <article key={row.version}>
                         <div>
                           <small>
-                            {row.source} · {when(row.published_at)}
+                            {row.source} · {when(row.published_at, row.captured_at)}
                           </small>
                           <a href={row.url} target="_blank" rel="noreferrer">
                             {row.title}
@@ -1665,7 +1668,7 @@ export default function ReaderApp() {
                     <option value="">选择同一方向下的事件…</option>
                     {mergeCandidates(view, detail).map((e) => (
                       <option key={e.id} value={e.id}>
-                        {when(e.published_at)} · {e.title}
+                        {when(e.published_at, e.captured_at)} · {e.title}
                       </option>
                     ))}
                   </select>
