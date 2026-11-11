@@ -3,6 +3,7 @@ import { searchSources, sourceName, type SearchSource } from "./searchSources";
 import FollowIntentForm, { intervalLabel } from "./FollowIntentForm";
 import StoryReader, { DetailActions, FeedbackChoices } from "./StoryDetail";
 import { Glyph, Sheet, Toast } from "./ui";
+import brandMark from "./assets/brand.svg?no-inline";
 
 import {
   actionLabel,
@@ -1839,13 +1840,14 @@ export default function ReaderApp() {
       <aside className="r-nav">
         <a
           className="r-brand"
+          aria-label="CFAW News · AI 事件简报"
           href="#briefing"
           onClick={(e) => {
             e.preventDefault();
             navigate("briefing");
           }}
         >
-          <span className="r-brand-mark">C</span>
+          <img className="r-brand-mark" src={brandMark} width={32} height={32} alt="" />
           <span>
             CFAW News<small>AI 事件简报</small>
           </span>
