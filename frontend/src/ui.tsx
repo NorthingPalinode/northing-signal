@@ -47,8 +47,8 @@ export function Glyph({ name, size = 20 }: { name: string; size?: number }) {
 }
 
 /**
- * Modal surface. `side` slides in from the right on desktop (reading panels);
- * every variant becomes a full-height bottom sheet on phones.
+ * Modal surface for short tasks (choices, forms, settings). Stories never open
+ * here; they get their own reading page. Every variant is a bottom sheet on phones.
  */
 export function Sheet({
   title,
@@ -60,7 +60,7 @@ export function Sheet({
   title: string;
   close: () => void;
   children: React.ReactNode;
-  variant?: "center" | "wide" | "side";
+  variant?: "center" | "wide";
   footer?: React.ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);

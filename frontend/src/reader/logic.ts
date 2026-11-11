@@ -12,9 +12,26 @@ export const topics: Record<Topic, string> = {
 
 export function pageFromHash(hash: string): Page {
   const value = hash.replace(/^#/, "");
+  if (storyFromHash(value)) return "story";
   return ["discover", "following", "saved", "library"].includes(value)
     ? (value as Page)
     : "briefing";
+}
+
+/** `#story/<id>` opens one story as its own reading page. */
+export function storyFromHash(hash: string) {
+  const match = /^#?story\/(.+)$/.exec(hash);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+/** Position of a story inside the list it was opened from. */
+export function neighbours(ids: string[], id: string) {
+  const index = ids.indexOf(id);
+  return {
+    index,
+    prev: index > 0 ? ids[index - 1] : "",
+    next: index >= 0 && index < ids.length - 1 ? ids[index + 1] : "",
+  };
 }
 
 export function when(value?: string | null, capturedAt?: string) {
