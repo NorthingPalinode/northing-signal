@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { searchSources, sourceName, type SearchSource } from "./searchSources";
 import FollowIntentForm, { intervalLabel } from "./FollowIntentForm";
-import StoryDetail, { DetailActions, FeedbackChoices } from "./StoryDetail";
+import StoryReader, { DetailActions, FeedbackChoices } from "./StoryDetail";
 import { Glyph, Sheet, Toast } from "./ui";
 
 import {
@@ -9,10 +9,12 @@ import {
   evidence,
   feedbackNotice,
   followSeed,
+  neighbours,
   pageFromHash,
   queueLabel,
   sections,
   statusLabel,
+  storyFromHash,
   topics,
   when,
 } from "./reader/logic";
@@ -56,7 +58,17 @@ const pageTitle: Record<Page, string> = {
   following: "话题追踪",
   saved: "我的收藏",
   library: "资料库",
+  story: "阅读",
 };
+const backLabel: Record<Page, string> = {
+  briefing: "简报",
+  discover: "搜索",
+  following: "追踪",
+  saved: "收藏",
+  library: "资料库",
+  story: "简报",
+};
+const dismissKinds = ["irrelevant", "thin", "duplicate"];
 
 const today = () =>
   new Intl.DateTimeFormat("zh-CN", {
@@ -68,7 +80,7 @@ const today = () =>
 /** Sends a one-off "shown" interaction the first time a story is on screen. */
 function useExposure(
   story: Story,
-  send: (s: Story, kind: string) => Promise<void>,
+  send: (s: Story, kind: string) => Promise<unknown>,
 ) {
   const ref = useRef<HTMLElement>(null);
   const sent = useRef(false);
@@ -119,7 +131,7 @@ function StoryRow({
   reason?: string;
   unread?: boolean;
   readOnly: boolean;
-  send: (s: Story, kind: string) => Promise<void>;
+  send: (s: Story, kind: string) => Promise<unknown>;
   open: () => void;
   toggleSave: () => void;
   askFeedback: () => void;
@@ -214,7 +226,7 @@ function TopicFilter({
   counts?: Partial<Record<Topic, number>>;
 }) {
   return (
-    <div className="r-chips" role="toolbar" aria-label="按方向筛选">
+    <div className="r-chips r-narrow-only" role="toolbar" aria-label="按方向筛选">
       <button
         className={!topic ? "active" : ""}
         aria-pressed={!topic}
@@ -237,6 +249,56 @@ function TopicFilter({
         ),
       )}
     </div>
+  );
+}
+
+/** Wide-screen topic filter: every direction with its share of stories. */
+function TopicCard({
+  topic,
+  setTopic,
+  counts,
+  title = "按方向",
+}: {
+  topic: string;
+  setTopic: (t: string) => void;
+  counts: Partial<Record<Topic, number>>;
+  title?: string;
+}) {
+  const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
+  const max = Math.max(1, ...Object.values(counts).map((n) => n || 0));
+  return (
+    <section className="r-card">
+      <h2 className="r-card-title">{title}</h2>
+      <div className="r-topic-list" role="toolbar" aria-label="按方向筛选">
+        <button
+          className={!topic ? "active" : ""}
+          aria-pressed={!topic}
+          onClick={() => setTopic("")}
+        >
+          <span>全部</span>
+          <small>{total}</small>
+        </button>
+        {(Object.entries(topics) as [Topic, string][]).map(([id, label]) => (
+          <button
+            key={id}
+            className={topic === id ? "active" : ""}
+            aria-pressed={topic === id}
+            disabled={!counts[id] && topic !== id}
+            onClick={() => setTopic(topic === id ? "" : id)}
+          >
+            <span>
+              <i className={"r-dot t-" + id} />
+              {label}
+            </span>
+            <small>{counts[id] || 0}</small>
+            <em
+              className={"t-" + id}
+              style={{ width: `${((counts[id] || 0) / max) * 100}%` }}
+            />
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -304,8 +366,13 @@ export default function ReaderApp() {
   } | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [queue, setQueue] = useState<Run[]>([]);
-  const [detail, setDetail] = useState<Story | null>(null);
-  const [detailFeedback, setDetailFeedback] = useState(false);
+  const [storyId, setStoryId] = useState(() =>
+    storyFromHash(window.location.hash),
+  );
+  /** Where the open story came from: its list (for prev/next) and page (for back). */
+  const [origin, setOrigin] = useState<{ page: Page; ids: string[] } | null>(
+    null,
+  );
   const [feedback, setFeedback] = useState<Story | null>(null);
   const [settings, setSettings] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -333,6 +400,10 @@ export default function ReaderApp() {
   >(null);
   const [historical, setHistorical] = useState<string | null>(null);
   const visited = useRef(false);
+  const scrollMemo = useRef<{ page: Page; y: number } | null>(null);
+  const restoreY = useRef<number | null>(null);
+  const opened = useRef("");
+  const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   const baseline = useRef<string | null | undefined>(undefined);
   const say = useCallback(
     (text: string, action?: { label: string; run: () => void }) =>
@@ -359,15 +430,26 @@ export default function ReaderApp() {
     const sync = () => {
       const next = currentPage();
       setPage(next);
+      setStoryId(storyFromHash(window.location.hash));
+      // Coming back from a story: return to the same place in the list.
+      if (next !== "story" && scrollMemo.current?.page === next)
+        restoreY.current = scrollMemo.current.y;
       // Only search and library show a search box; never filter other pages invisibly.
-      if (next !== "discover" && next !== "library") setQuery("");
+      if (next !== "discover" && next !== "library" && next !== "story")
+        setQuery("");
     };
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [page]);
+    window.scrollTo(0, restoreY.current ?? 0);
+    restoreY.current = null;
+  }, [page, storyId]);
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
   useEffect(() => {
     if (page !== "following" || historical) return;
     const timer = setInterval(() => void load().catch(fail), 30000);
@@ -451,22 +533,25 @@ export default function ReaderApp() {
   }
   const send = useCallback(
     async (story: Story, kind: string, retracts?: string) => {
+      const requestId = crypto.randomUUID();
       await request("/interactions", {
         method: "POST",
         body: JSON.stringify({
-          request_id: crypto.randomUUID(),
+          request_id: requestId,
           event_id: story.id,
           version: story.version,
           kind,
           retracts: retracts || null,
         }),
       });
+      return requestId;
     },
     [],
   );
   const noSend = useCallback(async () => {}, []);
   async function act(story: Story, kind: string) {
     try {
+      let requestId = "";
       if (kind === "saved" && story.saved) {
         for (const action of story.actions.filter((a) => a.kind === "saved"))
           await send(
@@ -474,23 +559,30 @@ export default function ReaderApp() {
             "retract",
             action.request_id,
           );
-      } else await send(story, kind);
+      } else requestId = await send(story, kind);
+      const dismissed = dismissKinds.includes(kind);
       say(
         feedbackNotice(kind, story.saved),
         kind === "saved" && !story.saved && page !== "saved"
           ? { label: "查看收藏", run: () => navigate("saved") }
-          : undefined,
+          : dismissed && requestId
+            ? {
+                label: "撤销",
+                run: () =>
+                  void send(story, "retract", requestId)
+                    .then(load)
+                    .then(() => say("已撤销，这条内容会照常出现。"))
+                    .catch(fail),
+              }
+            : undefined,
       );
       setFeedback(null);
-      setDetailFeedback(false);
-      const updated = await load();
-      setDetail((d) =>
-        d?.id === story.id
-          ? [...updated.events, ...(updated.saved_events || [])].find(
-              (e) => e.id === story.id,
-            ) || d
-          : d,
-      );
+      // Not interested in what you are reading: move straight on to the next story.
+      if (dismissed && page === "story" && storyId === story.id) {
+        if (position.next) goStory(position.next);
+        else closeStory();
+      }
+      await load();
     } catch (e) {
       fail(e);
     }
@@ -504,7 +596,6 @@ export default function ReaderApp() {
       );
       say("已撤回这条反馈。");
       await load();
-      setDetail(null);
     } catch (e) {
       fail(e);
     }
@@ -518,16 +609,26 @@ export default function ReaderApp() {
           body: JSON.stringify(body),
         }),
       );
-      setDetail(null);
+      // A merged story lives on under the event it was folded into.
+      if (path === "merge" && "into" in body) goStory(String(body.into));
       say(done);
     } catch (e) {
       fail(e);
     }
   }
-  function open(story: Story) {
-    setDetailFeedback(false);
-    setDetail(story);
-    if (!historical) void send(story, "opened").catch(fail);
+  /** Open a story as its own page; `list` is what prev/next walk through. */
+  function open(story: Story, list: Story[] = [story]) {
+    setOrigin({ page, ids: list.map((s) => s.id) });
+    scrollMemo.current = { page, y: window.scrollY };
+    window.location.hash = "story/" + encodeURIComponent(story.id);
+  }
+  /** Prev/next replace the history entry so Back always returns to the list. */
+  function goStory(id: string) {
+    window.location.replace("#story/" + encodeURIComponent(id));
+  }
+  function closeStory() {
+    if (origin) window.history.back();
+    else navigate("briefing");
   }
   async function discover() {
     const q = query.trim();
@@ -589,6 +690,7 @@ export default function ReaderApp() {
   }
   function navigate(next: Page) {
     setMenuOpen(false);
+    scrollMemo.current = null;
     setPage(next);
     window.location.hash = next;
     setTopic("");
@@ -608,7 +710,6 @@ export default function ReaderApp() {
     setQueue(updated.queue || []);
     setSelectedFollow(updated.confirmed_follow_id || "");
     setFollowForm(null);
-    setDetail(null);
     navigate("following");
     say("追踪方案已确认，后续按这份意图执行。");
   }
@@ -688,21 +789,65 @@ export default function ReaderApp() {
         ).length
       : 0;
   const all = view?.events || [];
+  const briefingList = [...focus, ...radar, ...more];
+  const storyPool = view ? [...all, ...(view.saved_events || [])] : [];
+  const byId = (id: string) => storyPool.find((e) => e.id === id);
+  const current = page === "story" ? byId(storyId) : undefined;
+  const trail = origin?.ids.includes(storyId)
+    ? origin.ids
+    : briefingList.map((s) => s.id);
+  const position = neighbours(trail, storyId);
+  const from = origin?.page || "briefing";
+  const navPage = page === "story" ? from : page;
+
+  useEffect(() => {
+    if (page !== "story") {
+      opened.current = "";
+      return;
+    }
+    if (!current || historical || opened.current === current.id) return;
+    opened.current = current.id;
+    void send(current, "opened").catch(fail);
+  }, [page, current?.id, historical, send, fail]);
+
+  keys.current = (e) => {
+    if (page !== "story" || e.metaKey || e.ctrlKey || e.altKey) return;
+    const target = e.target as HTMLElement;
+    if (
+      target.closest("input, textarea, select, [contenteditable]") ||
+      document.querySelector("dialog[open]")
+    )
+      return;
+    const key = e.key.toLowerCase();
+    if (key === "escape") closeStory();
+    else if ((key === "j" || key === "arrowright") && position.next)
+      goStory(position.next);
+    else if ((key === "k" || key === "arrowleft") && position.prev)
+      goStory(position.prev);
+    else return;
+    e.preventDefault();
+  };
 
   function row(
     story: Story,
     variant: "lead" | "normal" | "compact" = "normal",
-    extra: { index?: number; reason?: string; unread?: boolean } = {},
+    extra: {
+      index?: number;
+      reason?: string;
+      unread?: boolean;
+      list?: Story[];
+    } = {},
   ) {
+    const { list, ...rest } = extra;
     return (
       <StoryRow
         key={story.id + story.version}
         story={story}
         variant={variant}
-        {...extra}
+        {...rest}
         readOnly={!!historical}
         send={historical ? noSend : send}
-        open={() => open(story)}
+        open={() => open(story, list)}
         toggleSave={() => void act(story, "saved")}
         askFeedback={() => setFeedback(story)}
       />
@@ -727,8 +872,8 @@ export default function ReaderApp() {
   const secondaryNav = (
     <>
       <button
-        className={page === "library" ? "selected" : ""}
-        aria-current={page === "library" ? "page" : undefined}
+        className={navPage === "library" ? "selected" : ""}
+        aria-current={navPage === "library" ? "page" : undefined}
         onClick={() => navigate("library")}
       >
         <Glyph name="book" size={18} />
@@ -811,8 +956,10 @@ export default function ReaderApp() {
                     预算 {view.preferences.budget_minutes} 分钟
                   </button>
                 </header>
-                <div className="r-list-stories">
-                  {focus.map((s, i) => row(s, i === 0 ? "lead" : "normal"))}
+                <div className="r-list-stories r-grid">
+                  {focus.map((s, i) =>
+                    row(s, i === 0 ? "lead" : "normal", { list: briefingList }),
+                  )}
                 </div>
               </section>
             )}
@@ -823,7 +970,9 @@ export default function ReaderApp() {
                   <small>值得留意的新方向</small>
                 </header>
                 <div className="r-list-stories compact">
-                  {radar.map((s, i) => row(s, "compact", { index: i }))}
+                  {radar.map((s, i) =>
+                    row(s, "compact", { index: i, list: briefingList }),
+                  )}
                 </div>
               </section>
             )}
@@ -834,7 +983,9 @@ export default function ReaderApp() {
                   <small>{more.length} 项 · 最新在前</small>
                 </header>
                 <div className="r-list-stories compact">
-                  {visibleMore.map((s) => row(s, "compact"))}
+                  {visibleMore.map((s) =>
+                    row(s, "compact", { list: briefingList }),
+                  )}
                 </div>
                 {more.length > visibleMore.length && (
                   <button
@@ -903,7 +1054,7 @@ export default function ReaderApp() {
                   将检索 {channels.map((c) => searchSources[c]).join("、") || "—"}
                   <button
                     type="button"
-                    className="r-link small"
+                    className="r-link small r-narrow-only"
                     onClick={() => setChannelsOpen(!channelsOpen)}
                   >
                     {channelsOpen ? "收起" : "更改来源"}
@@ -928,7 +1079,7 @@ export default function ReaderApp() {
               </div>
             </div>
             {channelsOpen && (
-              <fieldset className="r-channel-grid">
+              <fieldset className="r-channel-grid r-narrow-only">
                 <legend>检索来源</legend>
                 {(Object.entries(searchSources) as [SearchSource, string][]).map(
                   ([id, label]) => (
@@ -1033,7 +1184,7 @@ export default function ReaderApp() {
           )}
           {browse.length ? (
             <div className="r-list-stories compact">
-              {browse.map((s) => row(s, "normal"))}
+              {browse.map((s) => row(s, "normal", { list: browse }))}
             </div>
           ) : (
             <Empty icon="search" title={q ? "已有内容中没有匹配" : "暂时没有内容"}>
@@ -1245,11 +1396,12 @@ export default function ReaderApp() {
             )}
           </header>
           {followingEvents.length ? (
-            <div className="r-list-stories">
+            <div className="r-list-stories r-grid">
               {followingEvents.map((s) =>
                 row(s, "normal", {
                   reason: followed.reasons?.[s.id],
                   unread: followed.unread_ids.includes(s.id),
+                  list: followingEvents,
                 }),
               )}
             </div>
@@ -1295,7 +1447,9 @@ export default function ReaderApp() {
           <TopicFilter topic={topic} setTopic={setTopic} counts={topicCounts(allSaved)} />
         )}
         {saved.length ? (
-          <div className="r-list-stories">{saved.map((s) => row(s))}</div>
+          <div className="r-list-stories r-grid">
+            {saved.map((s) => row(s, "normal", { list: saved }))}
+          </div>
         ) : (
           <Empty
             icon="bookmark"
@@ -1408,6 +1562,255 @@ export default function ReaderApp() {
     );
   }
 
+  function storyPage() {
+    if (!current)
+      return (
+        <Empty icon="compass" title="这条内容已不在当前列表中">
+          <p>它可能已被合并到其他事件，或属于另一期简报。</p>
+          <div className="r-empty-actions">
+            <button className="r-button primary" onClick={closeStory}>
+              返回{backLabel[from]}
+            </button>
+          </div>
+        </Empty>
+      );
+    const story = current;
+    return (
+      <StoryReader
+        key={story.id}
+        story={story}
+        view={view}
+        historical={!!historical}
+        prev={position.prev ? byId(position.prev) : undefined}
+        next={position.next ? byId(position.next) : undefined}
+        go={goStory}
+        act={(kind) => void act(story, kind)}
+        follow={() => followStory(story)}
+        askFeedback={() => setFeedback(story)}
+        undo={(a) => void undo(story, a)}
+        regroup={(path, body, done) => void regroup(story, path, body, done)}
+        loadRaw={() =>
+          request<{
+            title: string;
+            text: string;
+            url: string;
+            captured_at: string;
+          }>("/materials/" + story.version).catch((e) => {
+            fail(e);
+            throw e;
+          })
+        }
+      />
+    );
+  }
+  const followStory = (story: Story) =>
+    beginFollow(story.object || story.title, story.object || "");
+
+  /* ---------- right rail (wide screens) ---------- */
+
+  const briefingCounts = topicCounts(all.filter((e) => e.qualified && !e.dismissed));
+  const lastChecked = (view?.sources || [])
+    .filter((s) => s.kind !== "search" && s.state.at)
+    .map((s) => s.state.at!)
+    .sort()
+    .pop();
+
+  const followCard = (
+    <section className="r-card">
+      <header className="r-card-head">
+        <h2 className="r-card-title">追踪</h2>
+        <button className="r-link small" onClick={() => beginFollow()}>
+          <Glyph name="plus" size={14} /> 新增
+        </button>
+      </header>
+      {follows.length ? (
+        <div className="r-rail-list">
+          {follows.slice(0, 6).map((f) => (
+            <button
+              key={f.id}
+              onClick={() => {
+                setSelectedFollow(f.id);
+                navigate("following");
+              }}
+            >
+              <span>
+                <strong>{f.name}</strong>
+                <small>
+                  {!f.active
+                    ? "已暂停"
+                    : f.last_checked
+                      ? `检查于 ${when(f.last_checked)}`
+                      : "尚未检查"}
+                </small>
+              </span>
+              {f.unread_ids.length > 0 && (
+                <b aria-label={f.unread_ids.length + " 条新进展"}>
+                  {f.unread_ids.length}
+                </b>
+              )}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="r-card-text">
+          用一句话描述想了解的事，确认方案后会定期帮你检查。
+        </p>
+      )}
+    </section>
+  );
+
+  const recentSaved = saved.slice(0, 4);
+  const savedCard = (
+    <section className="r-card">
+      <header className="r-card-head">
+        <h2 className="r-card-title">最近收藏</h2>
+        {savedCount > 0 && (
+          <button className="r-link small" onClick={() => navigate("saved")}>
+            全部 {savedCount}
+          </button>
+        )}
+      </header>
+      {recentSaved.length ? (
+        <div className="r-rail-list">
+          {recentSaved.map((s) => (
+            <button key={s.id} onClick={() => open(s, recentSaved)}>
+              <span>
+                <strong className="r-clamp">{s.title}</strong>
+                <small>
+                  {s.source} · {when(s.published_at, s.captured_at)}
+                </small>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="r-card-text">点卡片上的书签收藏，方便之后重读。</p>
+      )}
+    </section>
+  );
+
+  function rail() {
+    if (!view) return null;
+    if (page === "briefing")
+      return (
+        <>
+          <section className="r-card">
+            <h2 className="r-card-title">{historical ? "过去的简报" : today()}</h2>
+            <div className="r-kpis">
+              <div>
+                <strong>{view.counts.eligible}</strong>
+                <small>项进展</small>
+              </div>
+              <div>
+                <strong>{!historical && baseline.current ? newSince : "–"}</strong>
+                <small>上次后新增</small>
+              </div>
+              <div>
+                <strong>{Math.max(1, Math.ceil(view.estimated_seconds / 60))}</strong>
+                <small>分钟读完重点</small>
+              </div>
+            </div>
+            <div className="r-card-foot">
+              <span>{lastChecked ? `最近检查 ${when(lastChecked)}` : "尚未检查来源"}</span>
+              <button className="r-link small" onClick={() => setSourcesOpen(true)}>
+                来源 {okSources}/{fixedSources} 正常
+              </button>
+            </div>
+          </section>
+          <TopicCard topic={topic} setTopic={setTopic} counts={briefingCounts} />
+          {followCard}
+          {savedCard}
+        </>
+      );
+    if (page === "discover")
+      return (
+        <>
+          {!query.trim() && (
+            <TopicCard topic={topic} setTopic={setTopic} counts={briefingCounts} />
+          )}
+          <section className="r-card">
+            <h2 className="r-card-title">外部检索来源</h2>
+            <div className="r-check-list">
+              {(Object.entries(searchSources) as [SearchSource, string][]).map(
+                ([id, label]) => (
+                  <label key={id}>
+                    <input
+                      type="checkbox"
+                      checked={channels.includes(id)}
+                      onChange={(e) =>
+                        setChannels(
+                          e.target.checked
+                            ? [...channels, id]
+                            : channels.filter((key) => key !== id),
+                        )
+                      }
+                    />
+                    {label}
+                  </label>
+                ),
+              )}
+            </div>
+            <p className="r-card-text">
+              关键词只发给勾选的来源。搜索摘要先作为线索，取得原文后再整理。
+            </p>
+          </section>
+          {followCard}
+        </>
+      );
+    if (page === "saved") {
+      const allSaved = view.saved_events || all.filter((e) => e.saved);
+      return (
+        <>
+          {allSaved.length > 0 && (
+            <TopicCard
+              topic={topic}
+              setTopic={setTopic}
+              counts={topicCounts(allSaved)}
+              title="收藏的方向"
+            />
+          )}
+          {followCard}
+        </>
+      );
+    }
+    if (page === "library") {
+      const fixed = view.sources.filter((s) => s.kind !== "search");
+      const bad = fixed.filter((s) => s.state.status === "error").length;
+      return (
+        <>
+          <section className="r-card">
+            <h2 className="r-card-title">资料来源</h2>
+            <div className="r-kpis">
+              <div>
+                <strong>{okSources}</strong>
+                <small>正常</small>
+              </div>
+              <div>
+                <strong>{bad}</strong>
+                <small>暂不可用</small>
+              </div>
+              <div>
+                <strong>{view.counts.pending}</strong>
+                <small>待整理</small>
+              </div>
+            </div>
+            <button className="r-button block" onClick={() => setSourcesOpen(true)}>
+              查看来源状态
+            </button>
+          </section>
+          <section className="r-card">
+            <h2 className="r-card-title">资料库里有什么</h2>
+            <p className="r-card-text">
+              这里保存每次收取的原始材料，包括尚未整理、判断为与 AI
+              无关或整理失败的条目。简报只展示整理后有依据的进展。
+            </p>
+          </section>
+        </>
+      );
+    }
+    return null;
+  }
+
   /* ---------- shell ---------- */
 
   const subtitle =
@@ -1429,6 +1832,8 @@ export default function ReaderApp() {
             ? `${view?.counts.materials || 0} 条原始材料，含尚未整理的线索`
             : "先在已有内容中查找，没有再去外部来源";
 
+  const railContent = rail();
+
   return (
     <div className="r-app">
       <aside className="r-nav">
@@ -1449,8 +1854,8 @@ export default function ReaderApp() {
           {primaryNav.map(([id, icon, label]) => (
             <button
               key={id}
-              className={page === id ? "selected" : ""}
-              aria-current={page === id ? "page" : undefined}
+              className={navPage === id ? "selected" : ""}
+              aria-current={navPage === id ? "page" : undefined}
               onClick={() => navigate(id)}
             >
               <Glyph name={icon} size={19} />
@@ -1464,29 +1869,63 @@ export default function ReaderApp() {
         <small className="r-nav-foot">本机个人阅读空间 · 无站外通知</small>
       </aside>
 
-      <div className="r-main">
-        <header className="r-top">
-          <div className="r-top-title">
-            <h1>{pageTitle[page]}</h1>
-            <p>{subtitle}</p>
-          </div>
-          <div className="r-top-actions">
-            {page === "following" && follows.length > 0 && (
-              <button className="r-button" onClick={() => beginFollow()}>
-                <Glyph name="plus" size={16} />
-                <span className="r-hide-sm">新增追踪</span>
-              </button>
-            )}
-            {updateButton}
-            <button
-              className="r-icon r-menu-button"
-              aria-label="更多"
-              onClick={() => setMenuOpen(true)}
-            >
-              <Glyph name="menu" size={20} />
+      <div className={"r-main" + (page === "story" ? " is-reading" : "")}>
+        {page === "story" ? (
+          <header className="r-top r-top-reader">
+            <button className="r-back" onClick={closeStory}>
+              <Glyph name="back" size={18} />
+              <span>返回{backLabel[from]}</span>
             </button>
-          </div>
-        </header>
+            {position.index >= 0 && trail.length > 1 && (
+              <div className="r-stepper">
+                <span>
+                  {position.index + 1} / {trail.length}
+                </span>
+                <button
+                  className="r-icon"
+                  aria-label="上一条"
+                  title="上一条（K）"
+                  disabled={!position.prev}
+                  onClick={() => goStory(position.prev)}
+                >
+                  <Glyph name="back" size={17} />
+                </button>
+                <button
+                  className="r-icon"
+                  aria-label="下一条"
+                  title="下一条（J）"
+                  disabled={!position.next}
+                  onClick={() => goStory(position.next)}
+                >
+                  <Glyph name="arrow" size={17} />
+                </button>
+              </div>
+            )}
+          </header>
+        ) : (
+          <header className="r-top">
+            <div className="r-top-title">
+              <h1>{pageTitle[page]}</h1>
+              <p>{subtitle}</p>
+            </div>
+            <div className="r-top-actions">
+              {page === "following" && follows.length > 0 && (
+                <button className="r-button" onClick={() => beginFollow()}>
+                  <Glyph name="plus" size={16} />
+                  <span className="r-hide-sm">新增追踪</span>
+                </button>
+              )}
+              {updateButton}
+              <button
+                className="r-icon r-menu-button"
+                aria-label="更多"
+                onClick={() => setMenuOpen(true)}
+              >
+                <Glyph name="menu" size={20} />
+              </button>
+            </div>
+          </header>
+        )}
 
         <div className="r-status-area">
           {error && (
@@ -1575,39 +2014,60 @@ export default function ReaderApp() {
             )}
         </div>
 
-        <main className="r-page">
-          {!view ? (
-            <div className="r-loading" aria-busy="true">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="r-skeleton" />
-              ))}
-            </div>
-          ) : page === "briefing" ? (
-            briefingPage()
-          ) : page === "discover" ? (
-            discoverPage()
-          ) : page === "following" ? (
-            followingPage()
-          ) : page === "saved" ? (
-            savedPage()
-          ) : (
-            libraryPage()
+        <div className={"r-body" + (railContent ? " has-rail" : "")}>
+          <main className="r-page">
+            {!view ? (
+              <div className="r-loading" aria-busy="true">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="r-skeleton" />
+                ))}
+              </div>
+            ) : page === "briefing" ? (
+              briefingPage()
+            ) : page === "discover" ? (
+              discoverPage()
+            ) : page === "following" ? (
+              followingPage()
+            ) : page === "saved" ? (
+              savedPage()
+            ) : page === "story" ? (
+              storyPage()
+            ) : (
+              libraryPage()
+            )}
+            {page !== "story" && (
+              <footer className="r-footer">
+                CFAW News · 关注变化，保留判断 ·{" "}
+                <button className="r-link" onClick={() => setSourcesOpen(true)}>
+                  来源与缺口
+                </button>
+              </footer>
+            )}
+          </main>
+          {railContent && (
+            <aside className="r-rail" aria-label="概览">
+              {railContent}
+            </aside>
           )}
-          <footer className="r-footer">
-            CFAW News · 关注变化，保留判断 ·{" "}
-            <button className="r-link" onClick={() => setSourcesOpen(true)}>
-              来源与缺口
-            </button>
-          </footer>
-        </main>
+        </div>
+        {current && !historical && (
+          <div className="r-reader-bar">
+            <DetailActions
+              story={current}
+              act={(kind) => void act(current, kind)}
+              follow={() => followStory(current)}
+              askFeedback={() => setFeedback(current)}
+            />
+          </div>
+        )}
       </div>
 
       <nav className="r-tabbar" aria-label="主要导航">
         {primaryNav.map(([id, icon, label]) => (
           <button
             key={id}
-            className={page === id ? "selected" : ""}
-            aria-current={page === id ? "page" : undefined}
+            className={navPage === id ? "selected" : ""}
+            aria-current={navPage === id ? "page" : undefined}
             onClick={() => navigate(id)}
           >
             <span>
@@ -1643,48 +2103,6 @@ export default function ReaderApp() {
             initialDescription={followForm.description}
             followId={followForm.follow_id}
             onConfirmed={confirmedFollow}
-          />
-        </Sheet>
-      )}
-
-      {detail && (
-        <Sheet
-          title="事件详情"
-          variant="side"
-          close={() => setDetail(null)}
-          footer={
-            historical ? undefined : (
-              <DetailActions
-                story={detail}
-                act={(kind) => void act(detail, kind)}
-                follow={() =>
-                  beginFollow(detail.object || detail.title, detail.object || "")
-                }
-                askFeedback={() => setDetailFeedback(!detailFeedback)}
-              />
-            )
-          }
-        >
-          <StoryDetail
-            key={detail.id + detail.version}
-            story={detail}
-            view={view}
-            historical={!!historical}
-            feedbackOpen={detailFeedback}
-            act={(kind) => void act(detail, kind)}
-            undo={(a) => void undo(detail, a)}
-            regroup={(path, body, done) => void regroup(detail, path, body, done)}
-            loadRaw={() =>
-              request<{
-                title: string;
-                text: string;
-                url: string;
-                captured_at: string;
-              }>("/materials/" + detail.version).catch((e) => {
-                fail(e);
-                throw e;
-              })
-            }
           />
         </Sheet>
       )}

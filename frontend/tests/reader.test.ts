@@ -6,10 +6,12 @@ import {
   feedbackNotice,
   followSeed,
   mergeCandidates,
+  neighbours,
   pageFromHash,
   queueLabel,
   sections,
   statusLabel,
+  storyFromHash,
   when,
 } from "../src/reader/logic.ts";
 import type { Run, Story, View } from "../src/reader/types.ts";
@@ -36,6 +38,16 @@ test("unknown or empty hashes open the briefing page", () => {
   assert.equal(pageFromHash("#saved"), "saved");
   assert.equal(pageFromHash(""), "briefing");
   assert.equal(pageFromHash("#settings"), "briefing");
+});
+
+test("story hashes open a reading page with its neighbours", () => {
+  assert.equal(pageFromHash("#story/evt-1"), "story");
+  assert.equal(storyFromHash("#story/evt%2F1"), "evt/1");
+  assert.equal(storyFromHash("#story/"), "");
+  assert.equal(pageFromHash("#story/"), "briefing");
+  assert.deepEqual(neighbours(["a", "b", "c"], "b"), { index: 1, prev: "a", next: "c" });
+  assert.deepEqual(neighbours(["a", "b"], "a"), { index: 0, prev: "", next: "b" });
+  assert.deepEqual(neighbours(["a"], "x"), { index: -1, prev: "", next: "" });
 });
 
 test("news is newest first within each section and respects filters", () => {
