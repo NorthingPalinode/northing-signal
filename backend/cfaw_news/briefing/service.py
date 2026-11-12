@@ -200,7 +200,27 @@ class ContentService:
         created = self.store.interact(body)
         if created and body.kind == "opened":
             self.know_on_open(body)
+            self.see_in_follows(body.event_id)
         return created
+
+    def see_in_follows(self, event_id):
+        """Reading a story clears it from every topic's "new" count (user request, 2026-11-12).
+
+        All of the event's current versions count as seen; a later report or correction
+        makes it new again, as with "mark all as read". Uses the projection the page was
+        built from when there is one: opening a story should not recompute the briefing.
+        """
+        value = self._projection[2] or self.projection()
+        event_id = self.resolve(event_id)
+        event = next((e for e in value["events"] if e["id"] == event_id), None)
+        if not event:
+            return
+        versions = {row["version"] for row in event["timeline"]}
+        stored = {f["id"]: f for f in self.store.follows()}
+        for follow in value["follows"]:
+            if event_id in follow["unread_ids"] and follow["id"] in stored:
+                seen = set(stored[follow["id"]].get("seen_versions", [])) | versions
+                self.store.update_follow(follow["id"], seen_versions=sorted(seen))
 
     def know_on_open(self, opened):
         """Opening a story marks this version known, once (user request, 2026-11-11).
