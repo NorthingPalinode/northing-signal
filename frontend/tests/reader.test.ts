@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   evidence,
+  clockLabel,
   feedbackNotice,
   followSeed,
   mergeCandidates,
@@ -12,6 +13,8 @@ import {
   sections,
   statusLabel,
   storyFromHash,
+  topThree,
+  updateLine,
   when,
 } from "../src/reader/logic.ts";
 import type { Run, Story, View } from "../src/reader/types.ts";
@@ -28,7 +31,7 @@ const story = (id: string, changes: Partial<Story> = {}): Story => ({
 const view = (events: Story[], changes: Partial<View> = {}): View => ({
   as_of: "2026-11-02T00:00:00Z", events, focus: [], radar: [], archive: [], budget_seconds: 420,
   estimated_seconds: 0, counts: { materials: 0, events: 0, eligible: 0, pending: 0, unrelated: 0 },
-  preferences: { topics: ["models"], depth: "balanced", budget_minutes: 7, exploration: false },
+  preferences: { topics: ["models"], depth: "balanced", budget_minutes: 7, exploration: false, auto_refresh: true },
   sources: [], model_configured: true, run: null, ...changes,
 });
 
@@ -116,6 +119,30 @@ test("feedback notices distinguish saving from unsaving", () => {
   assert.match(feedbackNotice("saved", false), /已收藏/);
   assert.equal(feedbackNotice("saved", true), "已取消收藏。");
   assert.match(feedbackNotice("known", false), /实质更新/);
+  assert.match(feedbackNotice("known", true), /未了解/);
+  assert.match(feedbackNotice("useful", false, "Agent 与开发"), /「Agent 与开发」/);
+  assert.match(feedbackNotice("useful", true), /撤回/);
+});
+
+test("top three follows the engine's focus order and skips dismissed stories", () => {
+  const events = ["a", "b", "c", "d", "e"].map((id) => story(id, { dismissed: id === "b" }));
+  const value = view(events, { focus: ["d", "b", "a", "c", "e"] });
+  assert.deepEqual(topThree(value).map((e) => e.id), ["d", "a", "c"]);
+  assert.deepEqual(topThree(null), []);
+});
+
+test("update line names the latest and the next update relative to today", () => {
+  const now = new Date(2026, 10, 11, 15, 0);
+  const at = (h: number, d = 11) => new Date(2026, 10, d, h, 0).toISOString();
+  assert.equal(clockLabel(at(12), now), "今天 12:00");
+  assert.equal(clockLabel(at(0, 12), now), "明天 0:00");
+  assert.equal(clockLabel(at(9, 9), now), "11月9日 9:00");
+  const value = view([], {
+    last_refresh: { id: "r", trigger: "scheduled", state: "completed", started_at: at(12), finished_at: at(12) },
+    schedule: { enabled: true, hours: [0, 12], next: at(0, 12) },
+  });
+  assert.equal(updateLine(value, now), "更新于 今天 12:00（自动） · 下次自动 明天 0:00");
+  assert.equal(updateLine(view([]), now), "尚未完成更新");
 });
 
 test("invalid dates are labelled instead of rendered", () => {

@@ -8,15 +8,20 @@ import brandMark from "./assets/brand.svg?no-inline";
 import {
   actionLabel,
   evidence,
+  clockLabel,
   feedbackNotice,
   followSeed,
+  hasAction,
   neighbours,
   pageFromHash,
   queueLabel,
   sections,
   statusLabel,
+  snapshotLabel,
   storyFromHash,
+  topThree,
   topics,
+  updateLine,
   when,
 } from "./reader/logic";
 import type {
@@ -26,10 +31,12 @@ import type {
   Page,
   Prefs,
   Run,
+  Snapshot,
   Source,
   Story,
   Topic,
   View,
+  WeeklyReport,
 } from "./reader/types";
 
 const currentPage = (): Page => pageFromHash(window.location.hash);
@@ -166,6 +173,10 @@ function StoryRow({
         <div className="r-meta">
           <span className={"r-topic t-" + story.topic}>{story.topic_label}</span>
           {unread && <span className="r-badge accent">新进展</span>}
+          {!unread && story.new && !story.known && <span className="r-badge new">新</span>}
+          {!unread && story.updated && !story.known && (
+            <span className="r-badge accent">有更新</span>
+          )}
           {story.protected && (
             <span className="r-badge warn">重要{actionLabel[story.action]}</span>
           )}
@@ -176,7 +187,10 @@ function StoryRow({
               when(story.published_at, story.captured_at),
               evidence(story.evidence, story.source_role, story.content_kind) +
                 (story.policy_stale ? "（旧版规则）" : ""),
-            ].join(" · ")}
+              story.known ? "已了解" : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
         </div>
         <h3>
@@ -208,7 +222,7 @@ function StoryRow({
               title="不感兴趣"
               onClick={askFeedback}
             >
-              <Glyph name="more" size={17} />
+              <Glyph name="hide" size={17} />
             </button>
           </span>
         )}
@@ -396,16 +410,17 @@ export default function ReaderApp() {
   >("all");
   const [showAllMore, setShowAllMore] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState<
-    { id: string; created_at: string }[] | null
-  >(null);
+  const [history, setHistory] = useState<Snapshot[] | null>(null);
+  const [report, setReport] = useState<{
+    range: "recent" | "last_week";
+    data: WeeklyReport | null;
+  } | null>(null);
   const [historical, setHistorical] = useState<string | null>(null);
   const visited = useRef(false);
   const scrollMemo = useRef<{ page: Page; y: number } | null>(null);
   const restoreY = useRef<number | null>(null);
   const opened = useRef("");
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
-  const baseline = useRef<string | null | undefined>(undefined);
   const say = useCallback(
     (text: string, action?: { label: string; run: () => void }) =>
       setNotice({ text, action }),
@@ -415,8 +430,6 @@ export default function ReaderApp() {
 
   const load = useCallback(async () => {
     const result = await request<View>("");
-    if (baseline.current === undefined)
-      baseline.current = result.last_visit || null;
     setView(result);
     setHistorical(null);
     setRun(result.run);
@@ -473,6 +486,22 @@ export default function ReaderApp() {
     document.addEventListener("visibilitychange", mark);
     return () => document.removeEventListener("visibilitychange", mark);
   }, [!!view, page]);
+  useEffect(() => {
+    // A scheduled update can start while the page sits open: look for it now and then.
+    if (run?.state === "running" || queue.length || historical) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void request<{ run: Run | null; queue: Run[] }>("/status")
+        .then((result) => {
+          if (result.run?.state === "running" || result.queue?.length) {
+            setRun(result.run);
+            setQueue(result.queue || []);
+          }
+        })
+        .catch(() => {});
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [run?.state, queue.length, historical]);
   useEffect(() => {
     if (run?.state !== "running" && !queue.length) return;
     let stopped = false;
@@ -553,8 +582,17 @@ export default function ReaderApp() {
   async function act(story: Story, kind: string) {
     try {
       let requestId = "";
-      if (kind === "saved" && story.saved) {
-        for (const action of story.actions.filter((a) => a.kind === "saved"))
+      // Saved, known and useful are toggles: a second press takes the reader's own action back.
+      const wasOn =
+        kind === "saved"
+          ? story.saved
+          : kind === "known"
+            ? story.known
+            : kind === "useful"
+              ? hasAction(story, "useful")
+              : false;
+      if (wasOn) {
+        for (const action of story.actions.filter((a) => a.kind === kind))
           await send(
             { ...story, version: action.version },
             "retract",
@@ -563,8 +601,8 @@ export default function ReaderApp() {
       } else requestId = await send(story, kind);
       const dismissed = dismissKinds.includes(kind);
       say(
-        feedbackNotice(kind, story.saved),
-        kind === "saved" && !story.saved && page !== "saved"
+        feedbackNotice(kind, wasOn, story.topic_label),
+        kind === "saved" && !wasOn && page !== "saved"
           ? { label: "查看收藏", run: () => navigate("saved") }
           : dismissed && requestId
             ? {
@@ -685,9 +723,30 @@ export default function ReaderApp() {
   }
   function openHistory() {
     setMenuOpen(false);
-    void request<{ id: string; created_at: string }[]>("/snapshots")
+    void request<Snapshot[]>("/snapshots")
       .then(setHistory)
       .catch(fail);
+  }
+  function openReport(range: "recent" | "last_week") {
+    setMenuOpen(false);
+    setReport({ range, data: null });
+    void request<WeeklyReport>("/reports/weekly?range=" + range)
+      .then((data) => setReport((r) => (r?.range === range ? { range, data } : r)))
+      .catch((e) => {
+        setReport(null);
+        fail(e);
+      });
+  }
+  function downloadReport(data: WeeklyReport) {
+    const url = URL.createObjectURL(
+      new Blob([data.markdown], { type: "text/markdown;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = data.filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say(`已下载 ${data.filename}`);
   }
   function navigate(next: Page) {
     setMenuOpen(false);
@@ -780,15 +839,7 @@ export default function ReaderApp() {
   const unreadFollows = follows.reduce((n, f) => n + f.unread_ids.length, 0);
   const savedCount =
     view?.saved_events?.length ?? view?.events.filter((e) => e.saved).length ?? 0;
-  const newSince =
-    baseline.current && view
-      ? view.events.filter(
-          (e) =>
-            e.qualified &&
-            !e.known &&
-            new Date(e.captured_at) > new Date(baseline.current!),
-        ).length
-      : 0;
+  const newCount = view?.counts.new || 0;
   const all = view?.events || [];
   const briefingList = [...focus, ...radar, ...more];
   const storyPool = view ? [...all, ...(view.saved_events || [])] : [];
@@ -808,8 +859,11 @@ export default function ReaderApp() {
     }
     if (!current || historical || opened.current === current.id) return;
     opened.current = current.id;
-    void send(current, "opened").catch(fail);
-  }, [page, current?.id, historical, send, fail]);
+    // Opening marks the story known on the server (once); reload to show it.
+    void send(current, "opened")
+      .then(() => load())
+      .catch(fail);
+  }, [page, current?.id, historical, send, fail, load]);
 
   keys.current = (e) => {
     if (page !== "story" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -885,6 +939,10 @@ export default function ReaderApp() {
         <Glyph name="clock" size={18} />
         <span>过去的简报</span>
       </button>
+      <button onClick={() => openReport("recent")}>
+        <Glyph name="doc" size={18} />
+        <span>导出周报</span>
+      </button>
       <button
         onClick={() => {
           setMenuOpen(false);
@@ -910,8 +968,37 @@ export default function ReaderApp() {
     if (!view) return null;
     const visibleMore = showAllMore ? more : more.slice(0, 6);
     const nothing = !focus.length && !radar.length && !more.length;
+    const top = topThree(view);
     return (
       <>
+        {!topic && top.length > 0 && (
+          <section className="r-top3" aria-label="最重要的几件事">
+            <header>
+              <h2>
+                {historical ? "当时" : "现在"}最重要的 {top.length} 件事
+              </h2>
+              <small>按重要性、时效和你的偏好选出</small>
+            </header>
+            <ol>
+              {top.map((s, i) => (
+                <li key={s.id} className={s.known ? "known" : ""}>
+                  <button onClick={() => open(s, top)}>
+                    <span className="r-top3-n" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <span className="r-top3-body">
+                      <strong>
+                        {s.title}
+                        {s.new && !s.known && <em className="r-badge new">新</em>}
+                      </strong>
+                      <small>{s.reason || s.summary}</small>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
         <TopicFilter
           topic={topic}
           setTopic={setTopic}
@@ -952,9 +1039,13 @@ export default function ReaderApp() {
               <section className="r-section">
                 <header className="r-section-head">
                   <h2>重点</h2>
-                  <button className="r-link" onClick={openPrefs}>
-                    约 {Math.max(1, Math.ceil(view.estimated_seconds / 60))} 分钟 ·
-                    预算 {view.preferences.budget_minutes} 分钟
+                  <button
+                    className="r-link"
+                    onClick={openPrefs}
+                    title="在「阅读偏好」中调整每次阅读时长"
+                  >
+                    按 {view.preferences.budget_minutes} 分钟阅读时长选出 · 约{" "}
+                    {Math.max(1, Math.ceil(view.estimated_seconds / 60))} 分钟
                   </button>
                 </header>
                 <div className="r-list-stories r-grid">
@@ -981,7 +1072,7 @@ export default function ReaderApp() {
               <section className="r-section">
                 <header className="r-section-head">
                   <h2>更多进展</h2>
-                  <small>{more.length} 项 · 最新在前</small>
+                  <small>{more.length} 项 · 有依据、未放进重点 · 最新在前</small>
                 </header>
                 <div className="r-list-stories compact">
                   {visibleMore.map((s) =>
@@ -1022,14 +1113,15 @@ export default function ReaderApp() {
           className="r-searchbox"
           role="search"
           onSubmit={(e) => {
+            // Enter only filters what is already here; going outside is the explicit button below.
             e.preventDefault();
-            void discover();
+            (document.activeElement as HTMLElement | null)?.blur();
           }}
         >
           <Glyph name="search" size={20} />
           <input
             aria-label="搜索"
-            placeholder="搜索已有进展，或在外部来源中查找…"
+            placeholder="筛选已有进展（标题、来源、方向…）"
             value={query}
             maxLength={80}
             onChange={(e) => setQuery(e.target.value)}
@@ -1068,7 +1160,7 @@ export default function ReaderApp() {
                   disabled={!channels.length || (running && run?.kind === "discovery")}
                   onClick={() => void discover()}
                 >
-                  搜索
+                  <Glyph name="search" size={15} /> 到外部搜索
                 </button>
                 <button
                   className="r-button"
@@ -1192,7 +1284,7 @@ export default function ReaderApp() {
               <p>
                 {q
                   ? q.length >= 2
-                    ? "可以用上方的「搜索」到外部来源查找。"
+                    ? "可以点上方的「到外部搜索」，在公开来源中查找。"
                     : "再多输入一个字。"
                   : "更新一次简报后，这里会出现可浏览的进展。"}
               </p>
@@ -1610,11 +1702,6 @@ export default function ReaderApp() {
   /* ---------- right rail (wide screens) ---------- */
 
   const briefingCounts = topicCounts(all.filter((e) => e.qualified && !e.dismissed));
-  const lastChecked = (view?.sources || [])
-    .filter((s) => s.kind !== "search" && s.state.at)
-    .map((s) => s.state.at!)
-    .sort()
-    .pop();
 
   const followCard = (
     <section className="r-card">
@@ -1703,8 +1790,8 @@ export default function ReaderApp() {
                 <small>项进展</small>
               </div>
               <div>
-                <strong>{!historical && baseline.current ? newSince : "–"}</strong>
-                <small>上次后新增</small>
+                <strong>{historical ? "–" : newCount}</strong>
+                <small>本次更新新增</small>
               </div>
               <div>
                 <strong>{Math.max(1, Math.ceil(view.estimated_seconds / 60))}</strong>
@@ -1712,7 +1799,7 @@ export default function ReaderApp() {
               </div>
             </div>
             <div className="r-card-foot">
-              <span>{lastChecked ? `最近检查 ${when(lastChecked)}` : "尚未检查来源"}</span>
+              <span>{historical ? "内容保持当时版本" : updateLine(view)}</span>
               <button className="r-link small" onClick={() => setSourcesOpen(true)}>
                 来源 {okSources}/{fixedSources} 正常
               </button>
@@ -1817,11 +1904,10 @@ export default function ReaderApp() {
   const subtitle =
     page === "briefing"
       ? [
-          today(),
+          // The date sits in the rail card on wide screens; phones need the update times more.
           view ? `${view.counts.eligible} 项进展` : "",
-          !historical && baseline.current
-            ? `上次打开后新增 ${newSince} 项`
-            : "",
+          !historical && newCount ? `新增 ${newCount} 项` : "",
+          !historical ? updateLine(view) : today(),
         ]
           .filter(Boolean)
           .join(" · ")
@@ -1917,7 +2003,7 @@ export default function ReaderApp() {
                   <span className="r-hide-sm">新增追踪</span>
                 </button>
               )}
-              {updateButton}
+              {page === "briefing" && updateButton}
               <button
                 className="r-icon r-menu-button"
                 aria-label="更多"
@@ -2110,7 +2196,7 @@ export default function ReaderApp() {
       )}
 
       {feedback && (
-        <Sheet title="减少这类内容" close={() => setFeedback(null)}>
+        <Sheet title="不感兴趣" close={() => setFeedback(null)}>
           <p className="r-sheet-lead">「{feedback.title}」哪里不合适？</p>
           <FeedbackChoices pick={(kind) => void act(feedback, kind)} />
         </Sheet>
@@ -2135,7 +2221,19 @@ export default function ReaderApp() {
                       .catch(fail)
                   }
                 >
-                  {when(row.created_at)}
+                  <span className="r-history-row">
+                    <strong>
+                      {clockLabel(row.created_at) || when(row.created_at)}
+                      {" · "}
+                      {row.kind === "refresh"
+                        ? row.trigger === "scheduled"
+                          ? "自动更新"
+                          : "手动更新"
+                        : snapshotLabel[row.kind || ""] || "简报"}
+                      {row.count ? ` · ${row.count} 项` : ""}
+                    </strong>
+                    {row.headlines?.[0] && <small>{row.headlines[0]}</small>}
+                  </span>
                   <Glyph name="arrow" size={15} />
                 </button>
               ))}
@@ -2143,6 +2241,70 @@ export default function ReaderApp() {
           ) : (
             <p className="r-sheet-lead">完成一次更新后，这里会保留当时的简报。</p>
           )}
+        </Sheet>
+      )}
+
+      {report && (
+        <Sheet
+          title="导出周报"
+          variant="wide"
+          close={() => setReport(null)}
+          footer={
+            report.data ? (
+              <div className="r-report-actions">
+                <button
+                  className="r-button"
+                  onClick={() =>
+                    void navigator.clipboard
+                      .writeText(report.data!.markdown)
+                      .then(() => say("已复制周报 Markdown。"))
+                      .catch(fail)
+                  }
+                >
+                  <Glyph name="copy" size={15} /> 复制
+                </button>
+                <button
+                  className="r-button primary"
+                  onClick={() => downloadReport(report.data!)}
+                >
+                  <Glyph name="download" size={15} /> 下载 Markdown
+                </button>
+              </div>
+            ) : undefined
+          }
+        >
+          <div className="r-report">
+            <div className="r-segment" role="tablist" aria-label="周报范围">
+              {(
+                [
+                  ["recent", "最近 7 天"],
+                  ["last_week", "上周（周一至周日）"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  role="tab"
+                  aria-selected={report.range === id}
+                  className={report.range === id ? "active" : ""}
+                  onClick={() => openReport(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {report.data ? (
+              <>
+                <p className="r-muted">
+                  {report.data.count} 项有依据的进展：先列出最重要的几件（最多 5 件），再按方向分组，附本周收藏和追踪话题。只汇总已整理的内容，不额外调用模型。
+                </p>
+                <pre className="r-report-preview" tabIndex={0}>
+                  {report.data.markdown}
+                </pre>
+              </>
+            ) : (
+              <div className="r-skeleton" aria-busy="true" />
+            )}
+          </div>
         </Sheet>
       )}
 
@@ -2237,6 +2399,19 @@ export default function ReaderApp() {
                 </div>
                 <p className="r-muted">用于决定「重点」放几条，不代表实际阅读速度。</p>
               </fieldset>
+              <label className="r-switch">
+                <input
+                  type="checkbox"
+                  checked={prefs.auto_refresh ?? true}
+                  onChange={(e) => setPrefs({ ...prefs, auto_refresh: e.target.checked })}
+                />
+                <span>
+                  <strong>每天 0 点和 12 点自动更新</strong>
+                  <small>
+                    仅在本机服务运行期间；错过的时间点会在下次启动后补一次。每次更新会调用你配置的模型。
+                  </small>
+                </span>
+              </label>
               <label className="r-switch">
                 <input
                   type="checkbox"

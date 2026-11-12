@@ -89,6 +89,14 @@ MIGRATIONS = [
     CREATE TABLE event_changes (
         id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL, created_at TEXT NOT NULL);
     """ + "\n".join(_revision_triggers(t, "content_revision") for t in EVENT_TABLES)),
+    # Briefing update history (manual and scheduled). The projection reads the latest completed
+    # one: stories first captured in it are new, and "known" marked while reading it settles later.
+    (5, """
+    CREATE TABLE refreshes (
+        id TEXT PRIMARY KEY, trigger TEXT NOT NULL, state TEXT NOT NULL,
+        started_at TEXT NOT NULL, finished_at TEXT, data TEXT NOT NULL);
+    CREATE INDEX refreshes_started ON refreshes(started_at);
+    """ + _revision_triggers("refreshes", "reader_revision")),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 SNAPSHOT_KEEP, SNAPSHOT_DAYS = 60, 90
@@ -386,8 +394,34 @@ class Store:
             if key:
                 row = db.execute("SELECT data FROM snapshots WHERE id=?", (key,)).fetchone()
                 return json.loads(row["data"]) if row else None
-            return [{"id": r["id"], "created_at": r["created_at"]}
-                    for r in db.execute("SELECT id, created_at FROM snapshots ORDER BY rowid DESC LIMIT 20")]
+            # Older snapshots have no label fields: those come back as None.
+            rows = db.execute("""SELECT id, created_at, json_extract(data, '$.snapshot_kind') AS kind,
+                json_extract(data, '$.snapshot_trigger') AS trigger,
+                json_extract(data, '$.headlines') AS headlines,
+                json_array_length(data, '$.focus') + json_array_length(data, '$.radar') AS count
+                FROM snapshots ORDER BY rowid DESC LIMIT 20""").fetchall()
+            return [{"id": r["id"], "created_at": r["created_at"], "kind": r["kind"], "trigger": r["trigger"],
+                     "headlines": json.loads(r["headlines"]) if r["headlines"] else [], "count": r["count"]}
+                    for r in rows]
+
+    def record_refresh(self, run):
+        """Insert or update one briefing update; called when it starts and when it ends."""
+        with self.connection() as db:
+            db.execute("INSERT OR REPLACE INTO refreshes VALUES (?, ?, ?, ?, ?, ?)",
+                       (run["id"], run.get("trigger", "manual"), run["state"], run["started_at"],
+                        run.get("finished_at"),
+                        self.encoded({k: run.get(k) for k in ("analyzed", "failed", "errors", "snapshot_id")})))
+
+    def refreshes(self, limit=20, completed=False):
+        query = "SELECT * FROM refreshes" + (" WHERE state='completed'" if completed else "")
+        with self.connection() as db:
+            rows = db.execute(query + " ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
+        return [{**json.loads(r["data"]), **{k: r[k] for k in ("id", "trigger", "state", "started_at", "finished_at")}}
+                for r in rows]
+
+    def last_refresh(self, completed=False):
+        rows = self.refreshes(1, completed)
+        return rows[0] if rows else None
 
     def receipts_today(self, since=None):
         with self.connection() as db:

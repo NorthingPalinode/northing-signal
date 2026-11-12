@@ -26,6 +26,10 @@ const paths: Record<string, string> = {
   play: "m7 4 13 8-13 8Z",
   trash: "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13",
   edit: "M4 20h4L19 9l-4-4L4 16Z",
+  hide: "M3 3l18 18 M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9 M6.6 6.6C3.9 8.4 2 12 2 12s4 7 10 7a9.6 9.6 0 0 0 5.4-1.6 M9.9 9.9a3 3 0 0 0 4.2 4.2",
+  download: "M12 3v12 m-5-5 5 5 5-5 M4 17v3h16v-3",
+  copy: "M9 9h11v11H9Z M5 15H4V4h11v1",
+  doc: "M6 3h8l4 4v14H6Z M14 3v4h4 M9 12h6 M9 16h6",
 };
 
 export function Glyph({ name, size = 20 }: { name: string; size?: number }) {

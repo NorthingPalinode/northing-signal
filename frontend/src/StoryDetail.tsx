@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Glyph } from "./ui";
-import { actionLabel, evidence, mergeCandidates, when } from "./reader/logic";
+import { actionLabel, evidence, hasAction, mergeCandidates, when } from "./reader/logic";
 import type { Action, Story, View } from "./reader/types";
 
+/** Reasons for "not interested". Knowing a story is its own toggle, not a reason here. */
 export const feedbackKinds: [string, string][] = [
   ["irrelevant", "方向与兴趣无关"],
   ["thin", "内容空泛，信息量太少"],
   ["duplicate", "重复了，没有新增信息"],
-  ["known", "已经了解这件事"],
 ];
 
 const actionNames: Record<string, string> = {
@@ -52,24 +52,29 @@ export function DetailActions({
   return (
     <div className={layout === "bar" ? "r-detail-actions" : "r-action-stack"}>
       <button
-        className={"r-chip-button" + (story.saved ? " on" : "")}
+        className={"r-chip-button fill" + (story.saved ? " on" : "")}
         aria-pressed={story.saved}
         onClick={() => act("saved")}
       >
         <Glyph name="bookmark" size={16} />
         {story.saved ? "已收藏" : "收藏"}
       </button>
-      <button className="r-chip-button" onClick={() => act("useful")}>
+      <button
+        className={"r-chip-button" + (hasAction(story, "useful") ? " on" : "")}
+        aria-pressed={hasAction(story, "useful")}
+        onClick={() => act("useful")}
+      >
         <Glyph name="thumb" size={16} />
         有帮助
       </button>
       <button
         className={"r-chip-button" + (story.known ? " on" : "")}
+        aria-pressed={story.known}
+        title={story.known ? "点击改回未了解" : "标为已了解"}
         onClick={() => act("known")}
-        disabled={story.known}
       >
         <Glyph name="check" size={16} />
-        {story.known ? "已了解" : "标为已了解"}
+        已了解
       </button>
       <button className="r-chip-button" onClick={follow}>
         <Glyph name="follow" size={16} />
@@ -81,7 +86,7 @@ export function DetailActions({
         title="不感兴趣"
         onClick={askFeedback}
       >
-        <Glyph name="more" size={16} />
+        <Glyph name="hide" size={16} />
         <span className={layout === "bar" ? "r-hide-sm" : ""}>不感兴趣</span>
       </button>
     </div>
@@ -149,6 +154,8 @@ export default function StoryReader({
       <article className="r-detail">
         <div className="r-meta">
           <span className={"r-topic t-" + story.topic}>{story.topic_label}</span>
+          {story.new && <span className="r-badge new">新</span>}
+          {story.updated && <span className="r-badge accent">有更新</span>}
           <span className="r-badge">
             {evidence(story.evidence, story.source_role, kind)}
           </span>
@@ -334,6 +341,9 @@ export default function StoryReader({
               askFeedback={askFeedback}
               layout="stack"
             />
+            <p className="r-action-note">
+              打开即视为已了解，下次更新起不再进入重点；可随时改回。
+            </p>
           </section>
         )}
         <section className="r-card">

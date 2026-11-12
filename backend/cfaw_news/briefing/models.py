@@ -126,6 +126,8 @@ class Preferences(Contract):
     depth: Literal["balanced", "technical", "overview"] = "balanced"
     budget_minutes: Literal[3, 7, 15] = 7
     exploration: bool = True
+    # Update the briefing at 00:00 and 12:00 (reader timezone) while the service runs.
+    auto_refresh: bool = True
 
     @field_validator("topics")
     @classmethod

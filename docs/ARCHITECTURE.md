@@ -57,6 +57,7 @@ flowchart LR
 - **线程**：路由和后台任务中的大块读取与投影计算放在线程中执行；`Store` 用一把锁串行访问 SQLite。
 - **规则代**：判断表的主键是 `(version, policy, epoch)`。`judgments()` 对每个版本取 epoch 最高、写入最晚的一条。启动时 `adopt_policy()` 把当前提示词在迁移前写下的判断认领为当前规则代；其他提示词版本写下的判断保持 epoch 0，不显示。`POLICY_EPOCH` 只在判断结论应当失效时才提升（`models.py`）。
 - **事件归属**（schema 4）：`event_members` 按材料 id 记录所属事件，分配后不再自动移动；`event_aliases` 记录合并前的旧 ID，`event_changes` 追加记录读者的拆分与合并。首次启动时按原有投影规则回填（`meta.events_backfilled`），保证事件 ID 不变。`project()` 接收归属后按它分组，未分配的材料仍按原规则计算。阅读操作按版本所属的材料归到当前事件。
+- **更新记录**（schema 5）：`refreshes` 记录每次简报更新（手动或定时）的开始、结束和状态，带修订触发器。投影以最近一次完成的更新为界计算“新 / 有更新”，并让此后标记的“已了解”只在下次更新时移出重点。`ContentService.refresh_due()` 在追踪循环中每 30 秒检查一次 0 点 / 12 点时段，作为非手动任务排队。
 - **失败退避**：`judgment_failures` 按 `(version, epoch)` 记录尝试次数、原因和下次重试时间（1 小时、6 小时，第三次后停止；引文/数字不符从第二级开始）。判断成功或调用 `/materials/{version}/retry` 后清除记录。
 
 ## 任务队列
