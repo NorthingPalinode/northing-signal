@@ -13,6 +13,8 @@ export type Prefs = {
   depth: "balanced" | "technical" | "overview";
   budget_minutes: 3 | 7 | 15;
   exploration: boolean;
+  /** Update at 00:00 and 12:00 while the service runs. */
+  auto_refresh: boolean;
 };
 export type Claim = { statement: string; quote: string; kind: string };
 export type Action = { request_id: string; kind: string; at: string; version: string };
@@ -65,6 +67,13 @@ export type Story = {
   object?: string;
   /** Judged under an older policy epoch; waiting to be re-judged. */
   policy_stale?: boolean;
+  /** First captured in the latest update. */
+  new?: boolean;
+  /** An older event that got a new report in the latest update. */
+  updated?: boolean;
+  /** Known before the latest update: it has left the focus. Marked since: only greyed. */
+  known_earlier?: boolean;
+  score?: number;
 };
 export type Follow = {
   id: string;
@@ -131,8 +140,33 @@ export type Archive = {
   status: string;
   failure?: { code: string; attempts: number; retry_at: string | null };
 };
+export type Refresh = {
+  id: string;
+  trigger: "manual" | "scheduled";
+  state: string;
+  started_at: string;
+  finished_at: string | null;
+};
+export type Snapshot = {
+  id: string;
+  created_at: string;
+  kind?: string | null;
+  trigger?: string | null;
+  headlines?: string[];
+  count?: number | null;
+};
+export type WeeklyReport = {
+  title: string;
+  filename: string;
+  markdown: string;
+  count: number;
+  start: string;
+  end: string;
+};
 export type View = {
   as_of: string;
+  last_refresh?: Refresh | null;
+  schedule?: { enabled: boolean; hours: number[]; next: string };
   last_visit?: string | null;
   events: Story[];
   focus: string[];
@@ -147,6 +181,8 @@ export type View = {
     pending: number;
     unrelated: number;
     failed?: number;
+    /** Stories first captured in the latest update. */
+    new?: number;
   };
   preferences: Prefs;
   sources: Source[];

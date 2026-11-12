@@ -5,14 +5,26 @@ import json
 import logging
 import time
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from .collect import collect, enrich
 from .discover import discover
 from .engine import active_actions, frame_key, occurrences, project, stamp, text_key
 from .events import assign, frame_of, resolve
 from .intent import IntentEngine, recall_candidates
-from .models import POLICY_EPOCH, Preferences, assessment_of, day_start, digest, now
+from .models import (
+    POLICY_EPOCH,
+    Interaction,
+    Preferences,
+    RefreshRequest,
+    assessment_of,
+    day_start,
+    digest,
+    now,
+)
+from .report import report_range, weekly_report
 from .search_sources import SEARCH_SOURCES, source_access
 from .tracking import matches, project_follows
 from .understand import POLICY_HASH, Analyzer, has_material
@@ -21,6 +33,18 @@ PROJECTION_MAX_AGE = 600
 # Later batches would fail the same way: no budget, no model, or the provider is unreachable.
 QUEUE_LIMIT = 8
 STOP_ANALYSIS = {"daily_model_budget_reached", "model_not_configured", "model_request_failed"}
+# Scheduled briefing updates, in the reader's timezone (user request, 2026-11-11).
+REFRESH_HOURS = (0, 12)
+
+
+def refresh_slots(clock, zone=None, hours=REFRESH_HOURS):
+    """(latest scheduled time at or before clock, the next one after it), as aware datetimes."""
+    local = clock.astimezone(zone)
+    day = local.replace(minute=0, second=0, microsecond=0)
+    times = sorted([day.replace(hour=h) - timedelta(days=1) for h in hours]
+                   + [day.replace(hour=h) for h in hours] + [day.replace(hour=h) + timedelta(days=1) for h in hours])
+    past = max(t for t in times if t <= local)
+    return past, min(t for t in times if t > local)
 
 
 class ContentService:
@@ -56,10 +80,13 @@ class ContentService:
         preferences = self.store.preferences()
         membership = self.membership()
         interactions = self.attribute(self.store.interactions(), membership)
-        value = project(materials, judgments, preferences, interactions, membership=membership)
+        latest = self.store.last_refresh(completed=True)
+        bounds = dict(briefing_at=latest["finished_at"], new_since=latest["started_at"]) if latest else {}
+        value = project(materials, judgments, preferences, interactions, membership=membership, **bounds)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
         saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
-                             interactions, membership=membership)
+                             interactions, membership=membership, **bounds)
+        value["last_refresh"] = latest
         value["saved_events"] = [e for e in saved_view["events"] if e["saved"]]
         follows = self.store.follows()
         assessments = {f["plan_hash"]: self.store.intent_assessments(f["plan_hash"])
@@ -85,7 +112,39 @@ class ContentService:
                      model_configured=self.analyzer.configured, run=self.run, queue=self.queued(),
                      policy=POLICY_HASH,
                      last_visit=self.store.last_visit())
+        _, upcoming = refresh_slots(datetime.now(timezone.utc), self.zone())
+        value["schedule"] = {"enabled": value["preferences"]["auto_refresh"], "hours": list(REFRESH_HOURS),
+                             "next": upcoming.astimezone(timezone.utc).isoformat()}
         return value
+
+    def zone(self):
+        name = getattr(self.settings, "reader_timezone", "")
+        return ZoneInfo(name) if name else None
+
+    def refresh_due(self, clock=None):
+        """Start the scheduled update when the latest 00:00/12:00 slot has no update yet.
+
+        A slot missed while the service was off runs once at the next check after start.
+        Any update counts, manual ones included, so a fresh manual update is not repeated.
+        """
+        if not self.store.preferences().auto_refresh:
+            return None
+        slot, _ = refresh_slots(clock or datetime.now(timezone.utc), self.zone())
+        last = self.store.last_refresh()
+        if (last and stamp(last["started_at"]) and stamp(last["started_at"]) >= slot) \
+                or self.pending(lambda run: run["kind"] == "refresh"):
+            return None
+        return self.start(RefreshRequest(), manual=False)
+
+    def weekly_report(self, kind="recent"):
+        zone = self.zone()
+        clock = datetime.now(timezone.utc)
+        start, end = report_range(kind, clock, zone)
+        value = self.projection()
+        events = {e["id"]: e for e in value["events"]}
+        for event in value.get("saved_events", []):
+            events.setdefault(event["id"], event)
+        return weekly_report(list(events.values()), value["follows"], start, end, generated_at=clock, zone=zone)
 
     def assign_events(self):
         """Give newly judged materials a lasting event; the first run adopts the old grouping.
@@ -138,7 +197,21 @@ class ContentService:
             revision = self.assign_events()  # read once: this runs for every card shown
             if self.event_of(body.version, revision) != self.resolve(body.event_id, revision):
                 raise LookupError("内容版本不存在，请重新读取")
-        return self.store.interact(body)
+        created = self.store.interact(body)
+        if created and body.kind == "opened":
+            self.know_on_open(body)
+        return created
+
+    def know_on_open(self, opened):
+        """Opening a story marks this version known, once (user request, 2026-11-11).
+
+        Any earlier "known" for the version, even one the reader took back, stops it: after
+        "mark as not known", reopening the story leaves that choice alone.
+        """
+        if any(a["version"] == opened.version for a in self.store.interactions(["known"])):
+            return
+        self.store.interact(Interaction(request_id="auto-known-" + digest(opened.request_id)[:24],
+                                        event_id=opened.event_id, version=opened.version, kind="known"))
 
     def resolve(self, event_id, revision=None):
         return resolve(event_id, self.store.event_state(revision)[2])
@@ -190,12 +263,15 @@ class ContentService:
         self.store.regroup({"kind": "merge", "event": source, "into": target, "materials": moving},
                            moving, target, alias=source)
 
-    def snapshot_view(self):
+    def snapshot_view(self, run=None):
         """What a past briefing needs to be re-read: its ranked events, not the whole library."""
         value = self.view()
         shown = set(value["focus"]) | set(value["radar"])
+        titles = {e["id"]: e["title"] for e in value["events"]}
         return {**value, "events": [e for e in value["events"] if e["id"] in shown],
-                "archive": [], "saved_events": [], "follows": [], "run": None, "queue": []}
+                "archive": [], "saved_events": [], "follows": [], "run": None, "queue": [],
+                "snapshot_kind": (run or {}).get("kind"), "snapshot_trigger": (run or {}).get("trigger"),
+                "headlines": [titles[i] for i in value["focus"][:3] if i in titles]}
 
     def source_list(self):
         states = self.store.source_states()
@@ -286,7 +362,7 @@ class ContentService:
                     except ValueError as error:
                         run["errors"].append(str(error))
             # Build the snapshot first: a cancel while it is prepared publishes nothing.
-            snapshot = await asyncio.to_thread(self.snapshot_view)
+            snapshot = await asyncio.to_thread(self.snapshot_view, run)
             run.update(state="completed", finished_at=now())
             run["snapshot_id"] = self.store.snapshot(snapshot)
         except asyncio.CancelledError:
@@ -446,20 +522,26 @@ class ContentService:
         while True:
             await asyncio.sleep(30)
             try:
+                self.refresh_due()
+            except Exception as error:
+                logging.getLogger(__name__).warning("Scheduled update check failed: %s", type(error).__name__)
+            try:
                 self.track_due()
             except Exception as error:
                 logging.getLogger(__name__).warning("Topic tracking check failed: %s", type(error).__name__)
 
-    def start(self, request):
+    def start(self, request, manual=True):
         existing = self.pending(lambda run: run["kind"] == "refresh")
         if existing:
             return existing
-        return self.submit(self.new_run("refresh", "collecting"), lambda run: self.refresh(request, run))
+        run = self.new_run("refresh", "collecting", trigger="manual" if manual else "scheduled")
+        return self.submit(run, lambda run: self.refresh(request, run), manual=manual)
 
     async def refresh(self, request, run):
         def progress(name, state):
             run["sources_done"] += 1
             run["current_source"] = name
+        self.store.record_refresh(run)
         try:
             await collect(self.store, self.sources, request.limit_per_source, progress)
             run["stage"] = "reading"
@@ -469,7 +551,7 @@ class ContentService:
             candidates.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
             await self.analyze(candidates, run, request.analyze_limit)
             run["stage"] = "publishing"
-            snapshot = await asyncio.to_thread(self.snapshot_view)
+            snapshot = await asyncio.to_thread(self.snapshot_view, run)
             run["state"] = "completed"
             run["finished_at"] = now()
             run["snapshot_id"] = self.store.snapshot(snapshot)
@@ -478,6 +560,8 @@ class ContentService:
         except Exception as error:
             run.update(state="failed", finished_at=now())
             run["errors"].append(type(error).__name__)
+        finally:
+            self.store.record_refresh(run)
 
     async def cancel(self, run_id=None):
         """Stop the running job (default) or drop a queued one; the queue then moves on."""

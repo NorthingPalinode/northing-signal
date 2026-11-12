@@ -62,8 +62,16 @@ def active_actions(interactions):
     return [r for r in interactions if r["request_id"] not in retracted and r["kind"] != "retract"]
 
 
-def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None):
-    """membership: material id -> stored event id. Without it, events are derived as before."""
+def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
+            briefing_at=None, new_since=None):
+    """membership: material id -> stored event id. Without it, events are derived as before.
+
+    briefing_at: when the current briefing was made (the latest completed update). "Known" marked
+    after it greys the story but only leaves the focus at the next update, so a briefing does not
+    reshuffle while it is read. new_since: start of that update; events first captured since are new.
+    """
+    settled = stamp(briefing_at) if briefing_at else None
+    fresh_from = stamp(new_since) if new_since else None
     clock = stamp(as_of) if as_of else datetime.now(timezone.utc)
     groups, archive, identical = defaultdict(list), [], {}
     for material in sorted(materials, key=lambda m: (m.captured_at, m.id)):
@@ -133,15 +141,19 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         relevant = a.topic in preferences.topics
         recent_actions = [r for r in actions if r["event_id"] == event_id and r["version"] == version]
         known = any(r["kind"] == "known" for r in recent_actions)
+        known_earlier = any(r["kind"] == "known" and (settled is None or not stamp(r.get("at"))
+                                                       or stamp(r["at"]) <= settled) for r in recent_actions)
+        first_captured = min(m.captured_at for m, _, _ in members)
+        latest_captured = max(m.captured_at for m, _, _ in members)
         dismissed = any(r["kind"] in {"irrelevant", "thin", "duplicate"} for r in recent_actions)
-        protected = a.action in {"correction", "withdrawal"} and not known
+        protected = a.action in {"correction", "withdrawal"} and not known_earlier
         score = value + (7 if relevant else -3) + 3 * math.exp(-age_days / 7)
         score += max(-3, min(3, affinities[a.topic]))
         if preferences.depth == "technical" and a.content_type in {"research", "test", "tutorial"}:
             score += 3
         if preferences.depth == "overview" and a.content_type in {"release", "industry"}:
             score += 3
-        if known:
+        if known_earlier:
             score -= 16
         if dismissed:
             score -= 20
@@ -165,6 +177,11 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "published_at": material.published_at, "captured_at": material.captured_at,
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
+            "known_earlier": known_earlier, "first_captured_at": first_captured,
+            # New: first seen in the latest update. Updated: an older event that got a new report in it.
+            "new": bool(fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
+            "updated": bool(fresh_from and stamp(first_captured) and stamp(first_captured) < fresh_from
+                            and stamp(latest_captured) and stamp(latest_captured) >= fresh_from),
             "saved": any(r["kind"] == "saved" for r in actions if r["event_id"] == event_id),
             "relevant": relevant, "score": round(score, 2), "timeline": timeline,
             "age_days": round(age_days, 1),
@@ -176,7 +193,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
                         and (r["version"] == version or r["kind"] == "saved")],
         })
     events.sort(key=lambda row: (not row["protected"], -row["score"], row["id"]))
-    eligible = [e for e in events if e["qualified"] and not e["dismissed"] and not e["known"]
+    eligible = [e for e in events if e["qualified"] and not e["dismissed"] and not e["known_earlier"]
                 and (e["relevant"] or preferences.exploration) and (e["age_days"] <= 30 or e["protected"])]
     focus, radar, spent = [], [], 0
     topic_counts = defaultdict(int)
@@ -224,4 +241,5 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "archive": archive, "budget_seconds": budget, "estimated_seconds": spent,
             "counts": {"materials": len(archive), "events": len(events), "eligible": len(eligible),
                        "pending": sum(r["status"] == "pending" for r in archive),
-                       "unrelated": sum(r["status"] == "unrelated" for r in archive)}}
+                       "unrelated": sum(r["status"] == "unrelated" for r in archive),
+                       "new": sum(e["new"] and e["qualified"] and not e["dismissed"] for e in events)}}

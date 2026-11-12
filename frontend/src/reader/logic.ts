@@ -150,17 +150,70 @@ export function followSeed(description = "", context = "") {
       : "";
 }
 
-export function feedbackNotice(kind: string, wasSaved: boolean) {
-  return kind === "known"
-    ? "已标记了解；有实质更新时仍会出现。"
-    : kind === "saved"
-      ? wasSaved
-        ? "已取消收藏。"
-        : "已收藏，可在「收藏」中找到。"
-      : kind === "useful"
-        ? "已记录，下次整理会参考你的反馈。"
-        : "已记录，这条内容将减少推荐。";
+/** Toast after a reader action; `wasOn` is the state before a toggle (saved, known, useful). */
+export function feedbackNotice(kind: string, wasOn: boolean, topicLabel = "") {
+  if (kind === "known")
+    return wasOn
+      ? "已改回未了解，下次更新仍可能进入重点。"
+      : "已标为了解，下次更新起不再进入重点；有实质更新时仍会出现。";
+  if (kind === "saved") return wasOn ? "已取消收藏。" : "已收藏，可在「收藏」中找到。";
+  if (kind === "useful")
+    return wasOn
+      ? "已撤回「有帮助」。"
+      : `已记录，之后会多推荐${topicLabel ? `「${topicLabel}」方向的` : "类似"}内容。`;
+  return "已记录，类似内容会减少推荐。";
 }
+
+/** Whether the reader's own action of this kind is active on the story. */
+export const hasAction = (story: Story, kind: string) =>
+  story.actions.some((a) => a.kind === kind);
+
+/** The briefing's three most important stories, in the engine's ranking order (not by date). */
+export function topThree(view: View | null) {
+  if (!view) return [];
+  const byId = new Map(view.events.map((e) => [e.id, e]));
+  return view.focus
+    .map((id) => byId.get(id))
+    .filter((e): e is Story => !!e && !e.dismissed)
+    .slice(0, 3);
+}
+
+/** "今天 12:00" / "昨天 0:00" / "11月9日 12:00" relative to `now`. */
+export function clockLabel(value?: string | null, now = new Date()) {
+  const date = new Date(value ?? "");
+  if (Number.isNaN(date.getTime())) return "";
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((day(date) - day(now)) / 86400000);
+  const time = `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const prefix =
+    diff === 0
+      ? "今天"
+      : diff === -1
+        ? "昨天"
+        : diff === 1
+          ? "明天"
+          : `${date.getMonth() + 1}月${date.getDate()}日`;
+  return `${prefix} ${time}`;
+}
+
+/** One line about the latest and the next update. */
+export function updateLine(view: View | null, now = new Date()) {
+  if (!view) return "";
+  const last = view.last_refresh;
+  const parts = [
+    last?.finished_at
+      ? `更新于 ${clockLabel(last.finished_at, now)}${last.trigger === "scheduled" ? "（自动）" : ""}`
+      : "尚未完成更新",
+  ];
+  if (view.schedule?.enabled) parts.push(`下次自动 ${clockLabel(view.schedule.next, now)}`);
+  return parts.join(" · ");
+}
+
+export const snapshotLabel: Record<string, string> = {
+  refresh: "更新",
+  discovery: "外部搜索",
+  following: "话题追踪",
+};
 
 /** Short label for one waiting job in the task queue. */
 export function queueLabel(run: Run) {

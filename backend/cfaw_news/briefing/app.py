@@ -4,6 +4,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -92,6 +93,10 @@ def create_app(settings=None, store=None):
         if result is None:
             raise HTTPException(404, "这份简报不存在")
         return result
+
+    @app.get("/api/reader/reports/weekly")
+    async def weekly(range: Literal["recent", "last_week"] = "recent"):
+        return await off_loop(service.weekly_report, range)
 
     @app.get("/api/reader/status")
     async def status():
