@@ -297,6 +297,15 @@ def test_follow_persistence_aliases_and_version_scoped_unread(tmp_path):
     store.judge(revised.version, POLICY_HASH, assessment(action="correction").model_dump(), "fixture")
     assert len(service.view()["follows"][0]["unread_ids"]) == 1
     assert not service.view()["events"][0]["known"]
+    # Opening the story clears it from the topic's new count, until the next report arrives.
+    event = service.view()["events"][0]
+    service.record_interaction(Interaction(request_id="opened-follow-1", event_id=event["id"],
+                                           version=event["version"], kind="opened"))
+    assert not service.view()["follows"][0]["unread_ids"]
+    later = material(text="Atlas 2 is available. Research access requires approval. Now GA.")
+    store.capture(later)
+    store.judge(later.version, POLICY_HASH, assessment(action="update").model_dump(), "fixture")
+    assert len(service.view()["follows"][0]["unread_ids"]) == 1
     duplicate = store.save_follow(FollowInput(name="另一个名字", query="unmatched, Atlas 2", active=False))
     assert duplicate["id"] == follow["id"] and len(store.follows()) == 1
     store.update_follow(follow["id"], archived=True, active=False)
