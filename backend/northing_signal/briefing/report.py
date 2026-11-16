@@ -67,7 +67,7 @@ def weekly_report(events, follows, start, end, *, generated_at, zone=None):
              if any(a["kind"] == "saved" and (at := stamp(a.get("at"))) and start <= at < end
                     for a in e.get("actions", []))]
     last_day = end - timedelta(days=1)
-    title = f"CFAW News 周报 · {start.date().isoformat()} 至 {last_day.date().isoformat()}"
+    title = f"Northing Signal 周报 · {start.date().isoformat()} 至 {last_day.date().isoformat()}"
     sources = {e.get("source") for e in in_range}
     lines = [f"# {title}", ""]
     lines.append(f"> 共 {len(in_range)} 项有依据的进展，来自 {len(sources)} 个来源。"
@@ -106,6 +106,6 @@ def weekly_report(events, follows, start, end, *, generated_at, zone=None):
         lines += ["## 话题追踪", ""]
         lines += [f"- {name}：{count} 项相关进展" for name, count in tracked]
         lines.append("")
-    filename = f"cfaw-weekly-{start.date().isoformat()}.md"
+    filename = f"northing-signal-weekly-{start.date().isoformat()}.md"
     return {"title": title, "filename": filename, "markdown": "\n".join(lines).rstrip() + "\n",
             "count": len(in_range), "start": start.isoformat(), "end": end.isoformat()}

@@ -1,10 +1,10 @@
-# CFAW News
+# Northing Signal
 
 面向重度 AI 读者的本机事件追踪阅读器：聚合发布、文中测试与更正，帮助你查看具体变化、原始出处，以及宣称的依据与边界。
 
-[![starter-checks](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/V-Giotto/cfaw-news/actions/workflows/ci.yml)
+[![starter-checks](https://github.com/NorthingPalinode/northing-signal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/NorthingPalinode/northing-signal/actions/workflows/ci.yml)
 
-当前采用独立的 Python / React 内容引擎。旧版目标工作台与 G1–G4 研究材料已从主分支移除，保存在 [`archive/research-g1-g4`](https://github.com/V-Giotto/cfaw-news/tree/archive/research-g1-g4) 分支；旧个人数据库未自动迁移或删除，可以用 `scripts/export_legacy.py` 导出。
+当前采用独立的 Python / React 内容引擎。旧版目标工作台与 G1–G4 研究材料已从主分支移除，保存在 [`archive/research-g1-g4`](https://github.com/NorthingPalinode/northing-signal/tree/archive/research-g1-g4) 分支；旧个人数据库未自动迁移或删除，可以用 `scripts/export_legacy.py` 导出。
 
 当前版本已接入 **45 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
 
@@ -100,8 +100,8 @@ X 原生检索需要自己的应用授权；Artificial Analysis 数据 API 与 O
 ### Windows / PowerShell
 
 ```powershell
-git clone https://github.com/V-Giotto/cfaw-news.git
-cd cfaw-news
+git clone https://github.com/NorthingPalinode/northing-signal.git
+cd northing-signal
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 ```
@@ -111,8 +111,8 @@ powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/V-Giotto/cfaw-news.git
-cd cfaw-news
+git clone https://github.com/NorthingPalinode/northing-signal.git
+cd northing-signal
 [ -e .env ] || cp .env.example .env
 bash scripts/start.sh
 ```
@@ -171,7 +171,7 @@ npm run build
 
 默认 pytest 覆盖内容引擎和公网读取边界（`tests_reader/`）。CI 使用同一范围，并运行前端测试与构建；合成测试不是实网模型或真人阅读效果证明。
 
-主要入口是 `backend/cfaw_news/briefing/` 与 `frontend/src/ReaderApp.tsx`。实现、真实开发检查与限制见 [内容引擎说明](docs/CONTENT_ENGINE.md)；范围和后续方向见 [开发计划](docs/plans/AI_INFORMATION_QUALITY_IMPLEMENTATION_PLAN.md)。
+主要入口是 `backend/northing_signal/briefing/` 与 `frontend/src/ReaderApp.tsx`。实现、真实开发检查与限制见 [内容引擎说明](docs/CONTENT_ENGINE.md)；范围和后续方向见 [开发计划](docs/plans/AI_INFORMATION_QUALITY_IMPLEMENTATION_PLAN.md)。
 
 下一轮重点是外部重要事件漏报观察、主张级测试归属、持续事件与回访增量，以及对象快捷关注。它们仍有待实施或验证的部分，不能把计划或一次来源连通检查当作两周覆盖效果与用户收益。
 
@@ -179,6 +179,7 @@ npm run build
 
 - 当前是本机单用户开发版，不提供生产鉴权、公网部署或多用户隔离。
 - 数据默认保存在 `.local/briefing-v2.db`，结构升级前会自动备份为同目录下的 `.bak-v<旧版本号>` 文件；旧个人库（`.local/cfaw-news.db`）不自动迁移，可用 `python scripts/export_legacy.py` 只读导出为 JSON Lines。`data/archive/articles.json` 等迁移出处保留。
+- 在 Docker Compose 中升级时，沿用原来的项目名可复用数据卷。旧项目名为 `cfaw-news` 时，运行 `docker compose -p cfaw-news up --build --remove-orphans` 即可替换旧容器并保留数据。
 - 事件聚合使用具体事件框架和原文指纹，归属保存在本地：报道一旦归入某个事件，就不随重新整理而改变，事件 ID 保持稳定。不同措辞的同一次发布（如 “GPT-5” 与 “GPT-5 release”）会自动归并，规则刻意保守：主体、版本号和产品词标准化后必须完全一致，且相隔不超过 7 天。归错的报道可在阅读页的报道时间线中拆分，重复的事件可以手动合并。跨语言去重、长尾召回与摘要语义仍可能出错，尚未实现向量检索。
 - 真实材料、AI 开发标签、合成样例与用户反馈分开记录；小样本结果不等于独立研究结论或普遍准确率。
 - `.env`、`.local/`、`.tmp/`、虚拟环境、依赖、生成的 `frontend/dist/` 和 `dev-diaries/` 均不提交 Git。开发日记与私人数据永远仅保留在本地。

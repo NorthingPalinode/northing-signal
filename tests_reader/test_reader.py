@@ -6,13 +6,13 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from cfaw_news.briefing.app import create_app
-from cfaw_news.briefing.collect import parse
-from cfaw_news.briefing.engine import active_actions, project
-from cfaw_news.briefing.models import Assessment, Interaction, Material, Preferences
-from cfaw_news.briefing.settings import ReaderSettings as Settings
-from cfaw_news.briefing.store import Store
-from cfaw_news.briefing.understand import Analyzer, grounded, validate, validate_numbers
+from northing_signal.briefing.app import create_app
+from northing_signal.briefing.collect import parse
+from northing_signal.briefing.engine import active_actions, project
+from northing_signal.briefing.models import Assessment, Interaction, Material, Preferences
+from northing_signal.briefing.settings import ReaderSettings as Settings
+from northing_signal.briefing.store import Store
+from northing_signal.briefing.understand import Analyzer, grounded, validate, validate_numbers
 
 
 def settings(**changes):
@@ -43,7 +43,7 @@ def assessment(**changes):
 def test_runtime_imports_no_evaluation_framework():
     # Run in a clean process: other legacy tests may have imported evals in this interpreter.
     import subprocess
-    result = subprocess.run([sys.executable, "-c", "import sys; import cfaw_news.briefing.app; assert not any(x=='evals' or x.startswith('evals.') for x in sys.modules)"], capture_output=True)
+    result = subprocess.run([sys.executable, "-c", "import sys; import northing_signal.briefing.app; assert not any(x=='evals' or x.startswith('evals.') for x in sys.modules)"], capture_output=True)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
 
 
@@ -192,8 +192,8 @@ def test_budget_stops_before_external_request(tmp_path):
 
 
 def test_unlimited_defaults_continue_past_previous_daily_limits(tmp_path):
-    from cfaw_news.briefing.settings import ReaderSettings
     from fastapi.testclient import TestClient
+    from northing_signal.briefing.settings import ReaderSettings
     settings = ReaderSettings(_env_file=None)
     assert settings.reader_requests_per_day is None and settings.reader_tokens_per_day is None
     store = Store(tmp_path / "unlimited.db")
@@ -240,7 +240,7 @@ def test_api_boundary_preferences_and_missing_revision(tmp_path):
     from fastapi.testclient import TestClient
     store = Store(tmp_path / "reader.db")
     with TestClient(create_app(settings(), store)) as client:
-        from cfaw_news import __version__
+        from northing_signal import __version__
         health = client.get("/api/health").json()
         assert health["engine"] == "content-v1" and health["version"] == __version__
         assert client.get("/openapi.json").json()["info"]["version"] == __version__
@@ -253,8 +253,8 @@ def test_api_boundary_preferences_and_missing_revision(tmp_path):
 
 
 def test_cancel_stops_before_judgment_publication(tmp_path, monkeypatch):
-    from cfaw_news.briefing.models import RefreshRequest
-    from cfaw_news.briefing.service import ContentService
+    from northing_signal.briefing.models import RefreshRequest
+    from northing_signal.briefing.service import ContentService
     async def scenario():
         store = Store(tmp_path / "reader.db")
         store.capture(material())
@@ -266,8 +266,8 @@ def test_cancel_stops_before_judgment_publication(tmp_path, monkeypatch):
         async def slow_batch(items):
             entered.set()
             await asyncio.sleep(60)
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", collect_nothing)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", collect_nothing)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", collect_nothing)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", collect_nothing)
         monkeypatch.setattr(service.analyzer, "batch", slow_batch)
         service.start(RefreshRequest(analyze_limit=1))
         await entered.wait()
@@ -278,9 +278,9 @@ def test_cancel_stops_before_judgment_publication(tmp_path, monkeypatch):
 
 
 def test_follow_persistence_aliases_and_version_scoped_unread(tmp_path):
-    from cfaw_news.briefing.models import FollowInput
-    from cfaw_news.briefing.service import ContentService
-    from cfaw_news.briefing.understand import POLICY_HASH
+    from northing_signal.briefing.models import FollowInput
+    from northing_signal.briefing.service import ContentService
+    from northing_signal.briefing.understand import POLICY_HASH
     store = Store(tmp_path / "follow.db")
     item = material()
     store.capture(item)
@@ -304,8 +304,8 @@ def test_follow_persistence_aliases_and_version_scoped_unread(tmp_path):
 
 
 def test_follow_scheduler_respects_interval_pause_and_shared_worker(tmp_path, monkeypatch):
-    from cfaw_news.briefing.models import ConfirmFollow
-    from cfaw_news.briefing.service import ContentService
+    from northing_signal.briefing.models import ConfirmFollow
+    from northing_signal.briefing.service import ContentService
     async def scenario():
         store = Store(tmp_path / "scheduler.db")
         draft = store.create_follow_draft("追踪可复现的本地智能体实现和评估。", intent_plan())
@@ -321,9 +321,9 @@ def test_follow_scheduler_respects_interval_pause_and_shared_worker(tmp_path, mo
             return []
         async def no_network(*args, **kwargs):
             return []
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", no_network)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", no_network)
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", controlled_discovery)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", no_network)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", no_network)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", controlled_discovery)
         service.track_due()
         await entered.wait()
         service.track_due()
@@ -344,8 +344,8 @@ def test_follow_scheduler_respects_interval_pause_and_shared_worker(tmp_path, mo
 
 
 def test_saved_version_survives_unprocessed_revision_and_api_unfollow(tmp_path):
-    from cfaw_news.briefing.understand import POLICY_HASH
     from fastapi.testclient import TestClient
+    from northing_signal.briefing.understand import POLICY_HASH
     store = Store(tmp_path / "saved.db")
     item = material()
     store.capture(item)
@@ -361,7 +361,7 @@ def test_saved_version_survives_unprocessed_revision_and_api_unfollow(tmp_path):
                            "kind":"retract", "retracts":action["request_id"]}).status_code == 200
         assert not client.get("/api/reader").json()["saved_events"]
         assert client.post("/api/reader/follows", json={"name":"Atlas 2", "active":True}).status_code == 422
-        from cfaw_news.briefing.models import FollowInput
+        from northing_signal.briefing.models import FollowInput
         key = store.save_follow(FollowInput(name="Atlas 2", active=False))["id"]
         assert client.post(f"/api/reader/follows/{key}/refresh").status_code == 409
         assert client.post(f"/api/reader/follows/{key}/seen").status_code == 200
@@ -371,8 +371,8 @@ def test_saved_version_survives_unprocessed_revision_and_api_unfollow(tmp_path):
 
 
 def test_cancelling_follow_does_not_publish_late_model_output(tmp_path, monkeypatch):
-    from cfaw_news.briefing.models import ConfirmFollow
-    from cfaw_news.briefing.service import ContentService
+    from northing_signal.briefing.models import ConfirmFollow
+    from northing_signal.briefing.service import ContentService
     async def scenario():
         store = Store(tmp_path / "cancel-follow.db")
         draft = store.create_follow_draft("追踪本地智能体的实现、代码和具体评估。", intent_plan())
@@ -388,9 +388,9 @@ def test_cancelling_follow_does_not_publish_late_model_output(tmp_path, monkeypa
             return {items[0].version: assessment().model_dump()}
         async def no_network(*args, **kwargs):
             return []
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", no_network)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", no_network)
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", found)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", no_network)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", no_network)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", found)
         monkeypatch.setattr(service.analyzer, "batch", slow)
         service.start_follow(follow["id"])
         await entered.wait()
@@ -402,7 +402,7 @@ def test_cancelling_follow_does_not_publish_late_model_output(tmp_path, monkeypa
 
 
 def intent_plan(**changes):
-    from cfaw_news.briefing.models import TrackingPlan
+    from northing_signal.briefing.models import TrackingPlan
     value = dict(title="本地智能体工程", intent_summary="关注可在个人电脑运行的智能体工程实现与实测，排除融资宣传。",
                  focus=["长期记忆的实际实现", "可复现的开源代码与测试"], exclude=["融资消息与空泛宣传"],
                  entities=["local agents", "memory"], topics=["agents", "engineering"],
@@ -415,8 +415,8 @@ def intent_plan(**changes):
 
 
 def test_intent_preview_never_starts_tracking_and_confirmation_is_bound(tmp_path, monkeypatch):
-    from cfaw_news.briefing.models import ConfirmFollow
     from fastapi.testclient import TestClient
+    from northing_signal.briefing.models import ConfirmFollow
     store = Store(tmp_path / "intent-api.db")
     app = create_app(settings(), store)
     calls = []
@@ -426,8 +426,8 @@ def test_intent_preview_never_starts_tracking_and_confirmation_is_bound(tmp_path
     async def forbidden_search(*args, **kwargs):
         raise AssertionError("Unconfirmed intent must not start retrieval")
     monkeypatch.setattr(app.state.content.analyzer, "request_json", synthetic_plan)
-    monkeypatch.setattr("cfaw_news.briefing.service.discover", forbidden_search)
-    monkeypatch.setattr("cfaw_news.briefing.service.collect", forbidden_search)
+    monkeypatch.setattr("northing_signal.briefing.service.discover", forbidden_search)
+    monkeypatch.setattr("northing_signal.briefing.service.collect", forbidden_search)
     with TestClient(app) as client:
         response = client.post("/api/reader/follows/interpret", json={"description":"我想跟进本地智能体的实现和测试，不看融资宣传。"})
         assert response.status_code == 200
@@ -446,7 +446,7 @@ def test_intent_preview_never_starts_tracking_and_confirmation_is_bound(tmp_path
         store.confirm_follow(ConfirmFollow(draft_id=newer["id"], plan=intent_plan(interval_minutes=120), active=False))
         with pytest.raises(ValueError, match="已发生变化"):
             store.confirm_follow(ConfirmFollow(draft_id=older["id"], plan=intent_plan(), active=False))
-        from cfaw_news.briefing.models import FollowInput
+        from northing_signal.briefing.models import FollowInput
         legacy = store.save_follow(FollowInput(name="旧关键词", active=True))
         assert client.post(f"/api/reader/follows/{legacy['id']}/refresh").status_code == 409
         assert client.patch(f"/api/reader/follows/{legacy['id']}", json={"active":True}).status_code == 409
@@ -455,9 +455,9 @@ def test_intent_preview_never_starts_tracking_and_confirmation_is_bound(tmp_path
 
 
 def test_confirmed_intent_rotates_searches_and_semantics_controls_membership(tmp_path, monkeypatch):
-    from cfaw_news.briefing.models import ConfirmFollow
-    from cfaw_news.briefing.service import ContentService
-    from cfaw_news.briefing.understand import POLICY_HASH
+    from northing_signal.briefing.models import ConfirmFollow
+    from northing_signal.briefing.service import ContentService
+    from northing_signal.briefing.understand import POLICY_HASH
     async def scenario():
         store = Store(tmp_path / "semantic.db")
         draft = store.create_follow_draft("我关注可运行的本地工程实践，不看融资新闻。", intent_plan())
@@ -477,9 +477,9 @@ def test_confirmed_intent_rotates_searches_and_semantics_controls_membership(tmp
         async def semantic(follow, materials):
             semantic_calls.append(follow["plan_hash"])
             return {m.version:{"relevant":m.id == "implementation", "reason":"提供目标需要的工程实践" if m.id == "implementation" else "属于明确排除的融资消息"} for m in materials}
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", retrieve)
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", no_network)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", no_network)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", retrieve)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", no_network)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", no_network)
         monkeypatch.setattr(service.intent, "evaluate", semantic)
         service.start_follow(follow["id"])
         await service.task
@@ -498,9 +498,9 @@ def test_confirmed_intent_rotates_searches_and_semantics_controls_membership(tmp
 
 
 def test_cancel_intent_matching_and_shared_model_budget(tmp_path, monkeypatch):
-    from cfaw_news.briefing.models import ConfirmFollow
-    from cfaw_news.briefing.service import ContentService
-    from cfaw_news.briefing.understand import POLICY_HASH
+    from northing_signal.briefing.models import ConfirmFollow
+    from northing_signal.briefing.service import ContentService
+    from northing_signal.briefing.understand import POLICY_HASH
     async def scenario():
         store = Store(tmp_path / "intent-cancel.db")
         draft = store.create_follow_draft("关注有实际代码与测试结果的智能体工程项目。", intent_plan())
@@ -516,9 +516,9 @@ def test_cancel_intent_matching_and_shared_model_budget(tmp_path, monkeypatch):
             entered.set()
             await asyncio.sleep(60)
             return {item.version:{"relevant":True,"reason":"late result"}}
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", empty)
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", empty)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", empty)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", empty)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", empty)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", empty)
         monkeypatch.setattr(service.intent, "evaluate", delayed)
         service.start_follow(follow["id"])
         await entered.wait()
@@ -536,7 +536,7 @@ def test_intent_upstream_failure_is_not_reported_as_bad_description(tmp_path, mo
     client_type = httpx.AsyncClient
     def reply(request):
         return httpx.Response(500, json={"error": "private-upstream-body"})
-    monkeypatch.setattr("cfaw_news.briefing.understand.httpx.AsyncClient",
+    monkeypatch.setattr("northing_signal.briefing.understand.httpx.AsyncClient",
                         lambda **kwargs: client_type(transport=httpx.MockTransport(reply), **kwargs))
     store = Store(tmp_path / "upstream-failure.db")
     app = create_app(settings(llm_mode="compatible", llm_api_key="synthetic-key",
@@ -553,8 +553,8 @@ def test_intent_upstream_failure_is_not_reported_as_bad_description(tmp_path, mo
 
 
 def test_expanded_sources_preserve_evidence_types_and_safe_urls(monkeypatch):
-    from cfaw_news.briefing import search_sources as sources
-    from cfaw_news.briefing.understand import has_material
+    from northing_signal.briefing import search_sources as sources
+    from northing_signal.briefing.understand import has_material
     async def scenario():
         async def response(url, host, **kwargs):
             if host == "api.anysearch.com":
@@ -586,10 +586,10 @@ def test_expanded_sources_preserve_evidence_types_and_safe_urls(monkeypatch):
 
 
 def test_selected_discovery_channel_and_failed_source_are_isolated(tmp_path, monkeypatch):
-    from cfaw_news.briefing import discover as discovery
-    from cfaw_news.briefing.models import SearchDirection
-    from cfaw_news.briefing.search_sources import SEARCH_SOURCES
-    from cfaw_news.briefing.understand import has_material
+    from northing_signal.briefing import discover as discovery
+    from northing_signal.briefing.models import SearchDirection
+    from northing_signal.briefing.search_sources import SEARCH_SOURCES
+    from northing_signal.briefing.understand import has_material
     async def scenario():
         store = Store(tmp_path / "sources.db")
         lead = material(id="lead", text="Search snippet.", content_kind="search_excerpt")
@@ -623,10 +623,10 @@ def test_selected_discovery_channel_and_failed_source_are_isolated(tmp_path, mon
 
 
 def test_social_search_returns_only_platform_post_links_and_preserves_clues(monkeypatch, tmp_path):
-    from cfaw_news.briefing import search_sources as sources
-    from cfaw_news.briefing.collect import enrich
-    from cfaw_news.briefing.models import DiscoveryRequest
-    from cfaw_news.briefing.understand import has_material
+    from northing_signal.briefing import search_sources as sources
+    from northing_signal.briefing.collect import enrich
+    from northing_signal.briefing.models import DiscoveryRequest
+    from northing_signal.briefing.understand import has_material
     async def scenario():
         calls = []
         async def public_search(query, limit, settings):
@@ -639,7 +639,7 @@ def test_social_search_returns_only_platform_post_links_and_preserves_clues(monk
         async def forbidden_network(*args, **kwargs):
             raise AssertionError("Social search snippets must not be promoted from login shells")
         monkeypatch.setattr(sources, "web", public_search)
-        monkeypatch.setattr("cfaw_news.briefing.collect.public_document", forbidden_network)
+        monkeypatch.setattr("northing_signal.briefing.collect.public_document", forbidden_network)
         store = Store(tmp_path / "social-clues.db")
         for channel in sources.SOCIAL_SOURCES:
             rows = await sources.social_web(channel, "AI agents", 4)
@@ -656,8 +656,8 @@ def test_social_search_returns_only_platform_post_links_and_preserves_clues(monk
 def test_x_native_api_uses_own_token_and_actual_post_text(monkeypatch):
     from urllib.parse import parse_qs, urlsplit
 
-    from cfaw_news.briefing import search_sources as sources
-    from cfaw_news.briefing.settings import ReaderSettings
+    from northing_signal.briefing import search_sources as sources
+    from northing_signal.briefing.settings import ReaderSettings
     async def scenario():
         async def response(url, host, **kwargs):
             assert host == "api.x.com" and kwargs["key"] == "synthetic-project-token"
@@ -678,7 +678,7 @@ def test_x_native_api_uses_own_token_and_actual_post_text(monkeypatch):
 
 def test_search_post_does_not_redirect_credentials(monkeypatch):
     import httpx
-    from cfaw_news.briefing import collect as collection
+    from northing_signal.briefing import collect as collection
     async def scenario():
         client_type = httpx.AsyncClient
         requests = []

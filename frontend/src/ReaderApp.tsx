@@ -1926,7 +1926,7 @@ export default function ReaderApp() {
       <aside className="r-nav">
         <a
           className="r-brand"
-          aria-label="CFAW News · AI 事件简报"
+          aria-label="Northing Signal · AI 事件简报"
           href="#briefing"
           onClick={(e) => {
             e.preventDefault();
@@ -1935,7 +1935,7 @@ export default function ReaderApp() {
         >
           <img className="r-brand-mark" src={brandMark} width={32} height={32} alt="" />
           <span>
-            CFAW News<small>AI 事件简报</small>
+            Northing Signal<small>AI 事件简报</small>
           </span>
         </a>
         <nav aria-label="主要导航" className="r-nav-primary">
@@ -2125,7 +2125,7 @@ export default function ReaderApp() {
             )}
             {page !== "story" && (
               <footer className="r-footer">
-                CFAW News · 关注变化，保留判断 ·{" "}
+                Northing Signal · 关注变化，保留判断 ·{" "}
                 <button className="r-link" onClick={() => setSourcesOpen(true)}>
                   来源与缺口
                 </button>

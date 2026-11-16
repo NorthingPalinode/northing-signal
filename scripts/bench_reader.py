@@ -18,11 +18,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from cfaw_news.briefing.models import Assessment, Interaction, Material  # noqa: E402
-from cfaw_news.briefing.service import ContentService  # noqa: E402
-from cfaw_news.briefing.settings import ReaderSettings  # noqa: E402
-from cfaw_news.briefing.store import Store  # noqa: E402
-from cfaw_news.briefing.understand import POLICY_HASH  # noqa: E402
+from northing_signal.briefing.models import Assessment, Interaction, Material  # noqa: E402
+from northing_signal.briefing.service import ContentService  # noqa: E402
+from northing_signal.briefing.settings import ReaderSettings  # noqa: E402
+from northing_signal.briefing.store import Store  # noqa: E402
+from northing_signal.briefing.understand import POLICY_HASH  # noqa: E402
 
 TOPICS = ["models", "agents", "research", "engineering", "products", "industry"]
 

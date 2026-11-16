@@ -1,4 +1,4 @@
-# CFAW News：重度 AI 读者下一轮开发计划
+# Northing Signal：重度 AI 读者下一轮开发计划
 
 > 更新：2026-11-08（Asia/Shanghai）
 >

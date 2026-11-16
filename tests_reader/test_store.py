@@ -2,12 +2,12 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from cfaw_news.briefing import service as service_module
-from cfaw_news.briefing import store as store_module
-from cfaw_news.briefing.models import Interaction, Preferences
-from cfaw_news.briefing.service import ContentService
-from cfaw_news.briefing.store import SCHEMA_VERSION, Store
-from cfaw_news.briefing.understand import POLICY_HASH
+from northing_signal.briefing import service as service_module
+from northing_signal.briefing import store as store_module
+from northing_signal.briefing.models import Interaction, Preferences
+from northing_signal.briefing.service import ContentService
+from northing_signal.briefing.store import SCHEMA_VERSION, Store
+from northing_signal.briefing.understand import POLICY_HASH
 from test_reader import assessment, material, settings
 
 # The schema written by 0.3.0 before versioned migrations existed.

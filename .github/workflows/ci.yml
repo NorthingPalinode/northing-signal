@@ -32,17 +32,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t cfaw-news:ci .
+      - run: docker build -t northing-signal:ci .
       - name: Container starts the reader and reports the package version
         run: |
-          docker run -d --name cfaw -p 127.0.0.1:8000:8000 cfaw-news:ci
+          docker run -d --name northing-signal -p 127.0.0.1:8000:8000 northing-signal:ci
           for i in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8000/api/health > health.json && break
             sleep 1
           done
           cat health.json
-          expected=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/cfaw_news/__init__.py)
+          expected=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/northing_signal/__init__.py)
           python3 -c "import json,sys; h=json.load(open('health.json')); assert h['engine']=='content-v1' and h['version']==sys.argv[1], h" "$expected"
           curl -fsS -o /dev/null http://127.0.0.1:8000/
       - if: failure()
-        run: docker logs cfaw || true
+        run: docker logs northing-signal || true

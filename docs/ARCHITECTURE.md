@@ -1,6 +1,6 @@
 # 架构
 
-本机单用户的 Python / React 应用。运行时代码只有 `backend/cfaw_news/briefing/` 一个包和 `frontend/src/` 下的阅读器页面。产品行为与证据规则见 [内容引擎说明](CONTENT_ENGINE.md)，来源见 [来源接入说明](SOURCES.md)。
+本机单用户的 Python / React 应用。运行时代码只有 `backend/northing_signal/briefing/` 一个包和 `frontend/src/` 下的阅读器页面。产品行为与证据规则见 [内容引擎说明](CONTENT_ENGINE.md)，来源见 [来源接入说明](SOURCES.md)。
 
 ```mermaid
 flowchart LR
@@ -36,7 +36,7 @@ flowchart LR
 
 前端：`ReaderApp.tsx` 负责页面与交互；`reader/types.ts` 是 `/api/reader` 返回数据的类型；`reader/logic.ts` 放不依赖 React 和浏览器的纯函数（路由、列表划分、证据标签），由 `frontend/tests/` 覆盖。
 
-版本号只写在 `backend/cfaw_news/__init__.py`，`pyproject.toml`、API 和 `/api/health` 都从这里读取。
+版本号只写在 `backend/northing_signal/__init__.py`，`pyproject.toml`、API 和 `/api/health` 都从这里读取。
 
 ## 不变量
 

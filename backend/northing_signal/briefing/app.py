@@ -45,7 +45,7 @@ def create_app(settings=None, store=None):
         yield
         await service.close()
 
-    app = FastAPI(title="CFAW News · AI 简报", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="Northing Signal · AI 简报", version=__version__, lifespan=lifespan)
     app.state.content = service
 
     @app.middleware("http")

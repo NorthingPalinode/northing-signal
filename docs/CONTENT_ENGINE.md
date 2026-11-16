@@ -6,7 +6,7 @@
 
 ## 产品与目录
 
-默认入口是“我的简报、发现、关注、资料库”。“关注”集中承载话题追踪与我的收藏；资料库仅保留原始材料。旧版目标、日程和检查记录的代码已从主分支移除（保存在 `archive/research-g1-g4` 分支），旧个人库未被删除。产品运行路径使用 `backend/cfaw_news/briefing/`：
+默认入口是“我的简报、发现、关注、资料库”。“关注”集中承载话题追踪与我的收藏；资料库仅保留原始材料。旧版目标、日程和检查记录的代码已从主分支移除（保存在 `archive/research-g1-g4` 分支），旧个人库未被删除。产品运行路径使用 `backend/northing_signal/briefing/`：
 
 | 模块 | 职责 |
 |---|---|
@@ -98,12 +98,12 @@ powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
 ## 可重复的本地内容操作
 
 ```powershell
-.\.venv\Scripts\python.exe -m cfaw_news.briefing collect --limit 12
-.\.venv\Scripts\python.exe -m cfaw_news.briefing enrich --limit 24
-.\.venv\Scripts\python.exe -m cfaw_news.briefing analyze --limit 24
-.\.venv\Scripts\python.exe -m cfaw_news.briefing discover --query "LLM evaluation" --limit 4
-.\.venv\Scripts\python.exe -m cfaw_news.briefing recheck
-.\.venv\Scripts\python.exe -m cfaw_news.briefing evaluate --reference .local/reader-quality/reference.jsonl
+.\.venv\Scripts\python.exe -m northing_signal.briefing collect --limit 12
+.\.venv\Scripts\python.exe -m northing_signal.briefing enrich --limit 24
+.\.venv\Scripts\python.exe -m northing_signal.briefing analyze --limit 24
+.\.venv\Scripts\python.exe -m northing_signal.briefing discover --query "LLM evaluation" --limit 4
+.\.venv\Scripts\python.exe -m northing_signal.briefing recheck
+.\.venv\Scripts\python.exe -m northing_signal.briefing evaluate --reference .local/reader-quality/reference.jsonl
 ```
 
 collect/enrich/discover 联网，analyze 可能付费；recheck 只用已缓存失败输出重新做当前守卫检查，不新增模型调用；evaluate/status/export 不创建网络事件循环。

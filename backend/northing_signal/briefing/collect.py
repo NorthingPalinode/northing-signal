@@ -75,7 +75,7 @@ async def _fetch(url, hosts, *, method="GET", payload=None, headers=None, max_by
                                              follow_redirects=False, trust_env=method == "GET") as client:
                     async with client.stream(
                         method, httpx.URL(url).copy_with(host=address), json=payload,
-                        headers={"Host": host, "User-Agent": "CFAW-News/0.3 personal-reader",
+                        headers={"Host": host, "User-Agent": "Northing-Signal/0.3 personal-reader",
                                  "Accept": "application/atom+xml,application/rss+xml,application/json,text/xml,*/*", **(headers or {})},
                         extensions={"sni_hostname": host},
                     ) as response:

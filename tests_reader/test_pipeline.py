@@ -7,14 +7,19 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from cfaw_news.briefing import engine as engine_module
-from cfaw_news.briefing import service as service_module
-from cfaw_news.briefing import store as store_module
-from cfaw_news.briefing.app import create_app
-from cfaw_news.briefing.models import ConfirmFollow, DiscoveryRequest, RefreshRequest, day_start
-from cfaw_news.briefing.service import ContentService
-from cfaw_news.briefing.store import Store
-from cfaw_news.briefing.understand import POLICY_HASH
+from northing_signal.briefing import engine as engine_module
+from northing_signal.briefing import service as service_module
+from northing_signal.briefing import store as store_module
+from northing_signal.briefing.app import create_app
+from northing_signal.briefing.models import (
+    ConfirmFollow,
+    DiscoveryRequest,
+    RefreshRequest,
+    day_start,
+)
+from northing_signal.briefing.service import ContentService
+from northing_signal.briefing.store import Store
+from northing_signal.briefing.understand import POLICY_HASH
 from test_reader import assessment, intent_plan, material, settings
 
 MODEL = dict(llm_mode="compatible", llm_api_key="synthetic-key", llm_base_url="https://example.org/v1",
@@ -49,7 +54,7 @@ def fake_model(monkeypatch, answer):
         items, finish = result
         return httpx.Response(200, json={"choices": [{"finish_reason": finish, "message": {
             "content": json.dumps({"items": items})}}], "usage": {"total_tokens": 100}})
-    monkeypatch.setattr("cfaw_news.briefing.understand.httpx.AsyncClient",
+    monkeypatch.setattr("northing_signal.briefing.understand.httpx.AsyncClient",
                         lambda **kwargs: client_type(transport=httpx.MockTransport(reply), **kwargs))
     return calls
 
@@ -224,9 +229,9 @@ def test_queue_orders_manual_work_first_and_cancels_by_id(tmp_path, monkeypatch)
         async def searching(store, query, **kwargs):
             order.append(query)
             return []
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", blocking_collect)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", nothing)
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", searching)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", blocking_collect)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", nothing)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", searching)
         refresh = service.start(RefreshRequest(analyze_limit=0))
         await asyncio.sleep(0)
         assert refresh["state"] == "running" and service.start(RefreshRequest())["id"] == refresh["id"]
@@ -260,9 +265,9 @@ def test_pausing_a_topic_drops_its_queued_check_and_the_queue_is_bounded(tmp_pat
         async def blocking(*args, **kwargs):
             await release.wait()
             return []
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", blocking)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", blocking)
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", blocking)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", blocking)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", blocking)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", blocking)
         service.start(RefreshRequest(analyze_limit=0))
         service.start_follow(follow["id"])
         assert await service.cancel_follow(follow["id"]) and not service.queued()
@@ -302,9 +307,9 @@ def test_cancel_before_the_first_step_still_settles_and_advances_the_queue(tmp_p
         async def searching(store, query, **kwargs):
             searched.append(query)
             return []
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", nothing)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", nothing)
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", searching)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", nothing)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", nothing)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", searching)
         refresh = service.start(RefreshRequest(analyze_limit=0))
         waiting = service.start_discovery(DiscoveryRequest(query="next query", channels=["web"]))
         assert (await service.cancel())["id"] == refresh["id"]  # the task never ran a step
@@ -335,9 +340,9 @@ def test_asking_now_promotes_a_scheduled_check_and_restarts_clear_stale_queue_st
         async def blocking(*args, **kwargs):
             await release.wait()
             return []
-        monkeypatch.setattr("cfaw_news.briefing.service.collect", blocking)
-        monkeypatch.setattr("cfaw_news.briefing.service.enrich", blocking)
-        monkeypatch.setattr("cfaw_news.briefing.service.discover", blocking)
+        monkeypatch.setattr("northing_signal.briefing.service.collect", blocking)
+        monkeypatch.setattr("northing_signal.briefing.service.enrich", blocking)
+        monkeypatch.setattr("northing_signal.briefing.service.discover", blocking)
         service.start(RefreshRequest(analyze_limit=0))
         service.track_due()
         service.start_discovery(DiscoveryRequest(query="manual query", channels=["web"]))

@@ -3,11 +3,11 @@
 import sqlite3
 
 import pytest
-from cfaw_news.briefing.events import similarity
-from cfaw_news.briefing.models import Interaction
-from cfaw_news.briefing.service import ContentService
-from cfaw_news.briefing.store import Store
-from cfaw_news.briefing.understand import POLICY_HASH
+from northing_signal.briefing.events import similarity
+from northing_signal.briefing.models import Interaction
+from northing_signal.briefing.service import ContentService
+from northing_signal.briefing.store import Store
+from northing_signal.briefing.understand import POLICY_HASH
 from test_reader import assessment, material, settings
 
 DAY = "2026-11-0{}T08:00:00+00:00"
@@ -114,8 +114,8 @@ def test_existing_grouping_and_actions_are_adopted_unchanged(tmp_path):
                     claims=[dict(statement="已发布", quote=f"Atlas {i % 2} is available.", kind="announcement")])
              for i in range(4)]
     # Before persistence: the projection's own grouping and an action recorded against it.
-    from cfaw_news.briefing.engine import project
-    from cfaw_news.briefing.models import Preferences
+    from northing_signal.briefing.engine import project
+    from northing_signal.briefing.models import Preferences
     before = project(items, store.judgments(), Preferences())["events"]
     store.interact(Interaction(request_id="known-0001", event_id=before[0]["id"], version=before[0]["version"],
                                kind="known"))
@@ -128,8 +128,8 @@ def test_existing_grouping_and_actions_are_adopted_unchanged(tmp_path):
 
 
 def test_split_and_merge_move_materials_and_reader_actions_follow(tmp_path):
-    from cfaw_news.briefing.app import create_app
     from fastapi.testclient import TestClient
+    from northing_signal.briefing.app import create_app
     store = Store(tmp_path / "reader.db")
     a = judged(store, material(id="a", url="https://example.org/a"))
     b = judged(store, material(id="b", url="https://example.org/b", source_id="media", source_role="media",

@@ -1,4 +1,4 @@
-// Shapes returned by /api/reader. Keep in sync with backend/cfaw_news/briefing.
+// Shapes returned by /api/reader. Keep in sync with backend/northing_signal/briefing.
 import type { TrackingPlan } from "../FollowIntentForm";
 
 export type Topic =

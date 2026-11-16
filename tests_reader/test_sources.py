@@ -4,11 +4,11 @@ import asyncio
 import json
 
 import httpx
-from cfaw_news.briefing.collect import collect, enrich, parse
-from cfaw_news.briefing.models import Material
-from cfaw_news.briefing.source_adapters import hub_models
-from cfaw_news.briefing.store import Store
-from cfaw_news.briefing.understand import has_material
+from northing_signal.briefing.collect import collect, enrich, parse
+from northing_signal.briefing.models import Material
+from northing_signal.briefing.source_adapters import hub_models
+from northing_signal.briefing.store import Store
+from northing_signal.briefing.understand import has_material
 
 
 def source(kind="publisher_index", **changes):
@@ -35,7 +35,7 @@ def test_publisher_index_remains_a_lead_and_keeps_article_dates_and_revisions(tm
         return "https://example.org/news/beta", "text/html", (b'<html><head><meta property="article:published_time" content="2026-11-03T11:25:00Z"></head>'
             b'<body><article><h1>Beta model release</h1><p>' + b'Actual original model release with concrete runtime conditions. ' * 15 + b'</p></article></body></html>')
 
-    monkeypatch.setattr("cfaw_news.briefing.collect.public_document", original)
+    monkeypatch.setattr("northing_signal.briefing.collect.public_document", original)
     asyncio.run(enrich(store, materials=rows[:1]))
     assert store.material(rows[0].version).content_kind == "search_excerpt"
     updated = store.materials()[0]
@@ -111,7 +111,7 @@ def test_benchmark_excerpts_keep_checks_conditions_and_stable_versions():
 
 
 def test_collection_reports_denial_without_blocking_other_sources(tmp_path,monkeypatch):
-    from cfaw_news.briefing import collect as collection
+    from northing_signal.briefing import collect as collection
 
     async def read(config,limit):
         if config["id"] == "denied":
@@ -128,7 +128,7 @@ def test_collection_reports_denial_without_blocking_other_sources(tmp_path,monke
 
 
 def test_public_get_proxy_denial_stops_without_another_route(monkeypatch):
-    from cfaw_news.briefing import collect as collection
+    from northing_signal.briefing import collect as collection
     client_type = httpx.AsyncClient
     requests = []
 
@@ -158,7 +158,7 @@ def test_public_get_proxy_denial_stops_without_another_route(monkeypatch):
 
 
 def test_arxiv_fixed_feeds_and_discovery_share_serial_request_spacing(monkeypatch):
-    from cfaw_news.briefing import collect as collection
+    from northing_signal.briefing import collect as collection
     clock = [0.0]
     calls = []
     active = [0]

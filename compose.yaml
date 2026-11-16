@@ -1,5 +1,5 @@
 services:
-  cfaw-news:
+  northing-signal:
     build: .
     ports:
       # Local single-user app without authentication: keep the host side on loopback.
@@ -9,4 +9,5 @@ services:
     volumes:
       - cfaw-data:/app/.local
 volumes:
+  # Keep the existing volume key so an upgrade reuses the reader's data.
   cfaw-data:

@@ -4,12 +4,12 @@ import asyncio
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from cfaw_news.briefing.engine import project
-from cfaw_news.briefing.models import Interaction, Preferences
-from cfaw_news.briefing.report import report_range, weekly_report
-from cfaw_news.briefing.service import ContentService, refresh_slots
-from cfaw_news.briefing.store import Store
-from cfaw_news.briefing.understand import POLICY_HASH
+from northing_signal.briefing.engine import project
+from northing_signal.briefing.models import Interaction, Preferences
+from northing_signal.briefing.report import report_range, weekly_report
+from northing_signal.briefing.service import ContentService, refresh_slots
+from northing_signal.briefing.store import Store
+from northing_signal.briefing.understand import POLICY_HASH
 from test_reader import assessment, material, settings
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -74,8 +74,8 @@ def test_refresh_slots_are_midnight_and_noon_in_reader_time():
 def test_scheduled_update_runs_once_per_slot_and_can_be_turned_off(tmp_path, monkeypatch):
     async def collect_nothing(*args, **kwargs):
         return []
-    monkeypatch.setattr("cfaw_news.briefing.service.collect", collect_nothing)
-    monkeypatch.setattr("cfaw_news.briefing.service.enrich", collect_nothing)
+    monkeypatch.setattr("northing_signal.briefing.service.collect", collect_nothing)
+    monkeypatch.setattr("northing_signal.briefing.service.enrich", collect_nothing)
 
     async def scenario():
         store = Store(tmp_path / "reader.db")
@@ -149,7 +149,7 @@ def test_weekly_report_lists_the_range_by_importance_and_topic():
     follows = [{"name": "Agent 工程", "event_ids": ["b", "old"]}]
     report = weekly_report(events, follows, start, end, generated_at=clock, zone=SHANGHAI)
     text = report["markdown"]
-    assert report["count"] == 2 and report["filename"] == "cfaw-weekly-2026-11-05.md"
+    assert report["count"] == 2 and report["filename"] == "northing-signal-weekly-2026-11-05.md"
     assert "2026-11-05 至 2026-11-11" in text
     top = text.split("## 按方向")[0]
     assert top.index("事件 a") < top.index("事件 b")
@@ -163,10 +163,10 @@ def test_weekly_report_lists_the_range_by_importance_and_topic():
 
 
 def test_weekly_report_endpoint(tmp_path):
-    from cfaw_news.briefing.app import create_app
     from fastapi.testclient import TestClient
+    from northing_signal.briefing.app import create_app
     store = Store(tmp_path / "reader.db")
     with TestClient(create_app(settings(), store)) as client:
         body = client.get("/api/reader/reports/weekly?range=last_week").json()
-        assert body["count"] == 0 and body["markdown"].startswith("# CFAW News 周报")
+        assert body["count"] == 0 and body["markdown"].startswith("# Northing Signal 周报")
         assert client.get("/api/reader/reports/weekly?range=year").status_code == 422

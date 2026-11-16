@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from cfaw_news.briefing.net import (
+from northing_signal.briefing.net import (
     DNS_CACHE,
     OriginTLS,
     encrypted_addresses,
@@ -181,5 +181,5 @@ def test_mixed_public_reserved_dns_rechecks_public_dns_before_any_connection(mon
         return ["1.1.1.1"]
 
     monkeypatch.setattr("socket.getaddrinfo", addresses)
-    monkeypatch.setattr("cfaw_news.briefing.net.encrypted_addresses", clean)
+    monkeypatch.setattr("northing_signal.briefing.net.encrypted_addresses", clean)
     assert asyncio.run(pinned_addresses("https://publisher.example/story")) == ["1.1.1.1"]

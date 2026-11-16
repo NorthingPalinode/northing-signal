@@ -141,7 +141,7 @@ async def public_document(url, *, referer="", json_data=False, max_bytes=None):
         host = urlsplit(url).hostname
         headers = {
             "Host": host,
-            "User-Agent": "CFAW-News/0.3 personal-reader",
+            "User-Agent": "Northing-Signal/0.3 personal-reader",
             "Accept": "application/json" if json_data else "text/html,application/xhtml+xml",
         }
         if referer:

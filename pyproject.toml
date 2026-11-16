@@ -3,7 +3,7 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cfaw-news"
+name = "northing-signal"
 dynamic = ["version"]
 description = "A local AI intelligence reader with evidence and confirmed topic tracking"
 requires-python = ">=3.11"
@@ -20,7 +20,7 @@ dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
 where = ["backend"]
 
 [tool.setuptools.dynamic]
-version = {attr = "cfaw_news.__version__"}
+version = {attr = "northing_signal.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests_reader"]
