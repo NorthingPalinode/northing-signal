@@ -185,4 +185,10 @@ npm run build
 - `.env`、`.local/`、`.tmp/`、虚拟环境、依赖、生成的 `frontend/dist/` 和 `dev-diaries/` 均不提交 Git。开发日记与私人数据永远仅保留在本地。
 - 能抓到公开内容不代表拥有全文再分发权限；当前保存必要节选和出处，没有对外全文发布服务。
 
-代码许可：[Apache-2.0](LICENSE)；第三方资产见 [NOTICE](NOTICE)。归档分支中的 G1–G4 文档保留其原始研究与验收含义，不作为新内容引擎已实现能力或质量提升的证明。
+归档分支中的 G1–G4 文档保留其原始研究与验收含义，不作为新内容引擎已实现能力或质量提升的证明。
+
+## 许可证
+
+自本次许可变更起，项目方有权授权且此前未按其他条款发布的原创代码采用 [PolyForm Strict 1.0.0](LICENSE)。该许可允许非商业使用，商业使用、修改和再分发须另行获得授权。
+
+此前按 Apache 2.0 发布的代码（包括 [变更前的版本 `4b837cc`](https://github.com/NorthingPalinode/northing-signal/tree/4b837ccd1be72d6d4eed895704827d60c67f87ca) 及后续版本沿用的对应部分）仍可依 [Apache 2.0](LICENSE-APACHE) 使用。第三方依赖、来源内容及素材适用各自条款，见 [NOTICE](NOTICE)。

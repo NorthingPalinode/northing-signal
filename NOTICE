@@ -1,7 +1,9 @@
 Northing Signal - standalone development starter
 Copyright 2026 The CFAW News Contributors
 
-Code is provided under the Apache License, Version 2.0 (LICENSE).
+Previously released code remains available under the Apache License,
+Version 2.0 (LICENSE-APACHE). See the license section of README.md for
+the scope of PolyForm Strict 1.0.0 (LICENSE).
 This starter rewrites the application in Python and React. The former
 competition runtime, host, bundle and native integration are not included.
 
