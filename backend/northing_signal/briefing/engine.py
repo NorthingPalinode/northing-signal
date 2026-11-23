@@ -178,6 +178,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
             "known_earlier": known_earlier, "first_captured_at": first_captured,
+            "latest_captured_at": latest_captured,
             # New: first seen in the latest update. Updated: an older event that got a new report in it.
             "new": bool(fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
             "updated": bool(fresh_from and stamp(first_captured) and stamp(first_captured) < fresh_from

@@ -52,7 +52,7 @@ flowchart LR
 - **迁移**：`store.MIGRATIONS` 按编号顺序执行，当前版本记在 `meta.schema_version`。升级已有数据库前，先用 SQLite backup 复制一份 `briefing-v2.db.bak-v<旧版本>`；遇到比程序更新的数据库会拒绝启动。新增结构只能追加新的编号，不能修改已经执行过的迁移。
 - **修订号**：触发器在 `meta` 中维护两个计数器。`content_revision` 跟踪素材和判断，`reader_revision` 跟踪交互、偏好、关注和意图判断。其他进程（如命令行）的写入同样会更新。
 - **缓存**：`ContentService.projection()` 缓存事件投影、收藏与关注视图，修订号变化或超过 10 分钟后重新计算。超时是为了让时间衰减排序不在空闲时冻结。`Store.materials()` 按内容修订号缓存解析结果。
-- **交互校验**：`record_interaction()` 只依赖内容和收藏集合，所以高频的"已展示""已打开"不会触发完整投影。
+- **交互校验**：`record_interaction()` 只依赖内容和收藏集合，所以高频的"已展示""已打开"不会触发完整投影。"已打开"另外清除话题追踪中的新进展（`see_in_follows`），使用页面加载时已缓存的投影。
 - **快照**：只保存当时简报的 focus/radar 事件，不保存整个资料库。保留最近 60 份，以及 90 天内的全部快照。
 - **线程**：路由和后台任务中的大块读取与投影计算放在线程中执行；`Store` 用一把锁串行访问 SQLite。
 - **规则代**：判断表的主键是 `(version, policy, epoch)`。`judgments()` 对每个版本取 epoch 最高、写入最晚的一条。启动时 `adopt_policy()` 把当前提示词在迁移前写下的判断认领为当前规则代；其他提示词版本写下的判断保持 epoch 0，不显示。`POLICY_EPOCH` 只在判断结论应当失效时才提升（`models.py`）。

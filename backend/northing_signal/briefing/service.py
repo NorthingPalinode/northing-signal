@@ -24,6 +24,7 @@ from .models import (
     digest,
     now,
 )
+from .publish import publish
 from .report import report_range, weekly_report
 from .search_sources import SEARCH_SOURCES, source_access
 from .tracking import matches, project_follows
@@ -146,6 +147,17 @@ class ContentService:
             events.setdefault(event["id"], event)
         return weekly_report(list(events.values()), value["follows"], start, end, generated_at=clock, zone=zone)
 
+    def publish_digest(self, out_dir=None, clock=None):
+        """Write the public digest. Neutral projection: no preferences, actions or follows."""
+        target = self.settings.publish_path(out_dir)
+        if target is None:
+            raise ValueError("未设置公开日报目录（READER_PUBLISH_DIR 或 --out）")
+        self.assign_events()
+        events = project(self.store.materials(), self.store.judgments(), Preferences(),
+                         membership=self.membership())["events"]
+        return publish(events, target, clock=clock, zone=self.zone(),
+                       base_url=getattr(self.settings, "reader_public_url", ""))
+
     def assign_events(self):
         """Give newly judged materials a lasting event; the first run adopts the old grouping.
 
@@ -200,7 +212,27 @@ class ContentService:
         created = self.store.interact(body)
         if created and body.kind == "opened":
             self.know_on_open(body)
+            self.see_in_follows(body.event_id)
         return created
+
+    def see_in_follows(self, event_id):
+        """Reading a story clears it from every topic's "new" count (user request, 2026-11-12).
+
+        All of the event's current versions count as seen; a later report or correction
+        makes it new again, as with "mark all as read". Uses the projection the page was
+        built from when there is one: opening a story should not recompute the briefing.
+        """
+        value = self._projection[2] or self.projection()
+        event_id = self.resolve(event_id)
+        event = next((e for e in value["events"] if e["id"] == event_id), None)
+        if not event:
+            return
+        versions = {row["version"] for row in event["timeline"]}
+        stored = {f["id"]: f for f in self.store.follows()}
+        for follow in value["follows"]:
+            if event_id in follow["unread_ids"] and follow["id"] in stored:
+                seen = set(stored[follow["id"]].get("seen_versions", [])) | versions
+                self.store.update_follow(follow["id"], seen_versions=sorted(seen))
 
     def know_on_open(self, opened):
         """Opening a story marks this version known, once (user request, 2026-11-11).
@@ -555,6 +587,14 @@ class ContentService:
             run["state"] = "completed"
             run["finished_at"] = now()
             run["snapshot_id"] = self.store.snapshot(snapshot)
+            if self.settings.publish_path():
+                # A failed public write never fails the reader's own update.
+                try:
+                    result = await asyncio.to_thread(self.publish_digest)
+                    run["published_edition"] = result["edition"]
+                except Exception as error:  # noqa: BLE001 - reported on the run, update stays completed
+                    logging.getLogger(__name__).warning("public digest failed: %r", error)
+                    run["errors"].append("publish_failed")
         except asyncio.CancelledError:
             run.update(state="cancelled", finished_at=now())
         except Exception as error:

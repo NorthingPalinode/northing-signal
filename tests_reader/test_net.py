@@ -107,14 +107,14 @@ def test_proxy_tls_verifies_original_domain_when_tunnel_target_is_numeric():
     assert context.context.get_ca_certs()
 
 
-@pytest.mark.parametrize("dns_error", [False, True])
-def test_failed_system_route_uses_public_dns_and_reuses_verified_address(monkeypatch, dns_error):
+@pytest.mark.parametrize("system_address", ["8.8.4.4", None, "198.18.0.42"])
+def test_failed_system_route_uses_public_dns_and_reuses_verified_address(monkeypatch, system_address):
     calls = []
 
     def addresses(*args, **kwargs):
-        if dns_error:
+        if system_address is None:
             raise socket.gaierror("system DNS unavailable")
-        return [(2, 1, 6, "", ("8.8.4.4", 443))]
+        return [(2, 1, 6, "", (system_address, 443))]
 
     def handler(request):
         calls.append(request)
@@ -143,6 +143,19 @@ def test_failed_system_route_uses_public_dns_and_reuses_verified_address(monkeyp
     asyncio.run(check())
     assert len([r for r in calls if r.url.host == "dns.google"]) == 2
     assert all("cookie" not in r.headers and "authorization" not in r.headers for r in calls)
+
+
+@pytest.mark.parametrize(("host", "addresses"), [
+    ("198.18.0.42", ["198.18.0.42"]),
+    ("publisher.example", ["198.18.0.42", "192.168.1.42"]),
+])
+def test_fake_ip_fallback_does_not_accept_private_destinations(pinned_transport, monkeypatch, host, addresses):
+    calls, _ = pinned_transport
+    monkeypatch.setattr("socket.getaddrinfo",
+                        lambda *args, **kwargs: [(2, 1, 6, "", (address, 443)) for address in addresses])
+    with pytest.raises(ValueError, match="non_public_address"):
+        asyncio.run(public_document(f"https://{host}/story"))
+    assert not calls
 
 
 def test_encrypted_dns_cannot_introduce_a_private_destination(monkeypatch):

@@ -10,6 +10,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 
 DNS_CACHE = {}
+FAKE_IP_RANGE = ipaddress.ip_network("198.18.0.0/15")
 
 
 class OriginTLS:
@@ -79,10 +80,11 @@ async def pinned_addresses(url):
     try:
         return checked_addresses(addresses)
     except ValueError:
-        # A mixed public/reserved answer can be poisoned DNS. Obtain a fresh
-        # public answer instead of silently dropping records or using private
-        # ones. Purely private destinations remain rejected without fallback.
-        if not any(ipaddress.ip_address(value).is_global for value in addresses):
+        # Mixed public/reserved answers and Fake-IP DNS placeholders need a
+        # fresh public answer. Never connect to the placeholders themselves.
+        answers = [ipaddress.ip_address(value) for value in addresses]
+        fake_only = bool(answers) and host not in addresses and all(value in FAKE_IP_RANGE for value in answers)
+        if not fake_only and not any(value.is_global for value in answers):
             raise
         return await encrypted_addresses(host)
 
