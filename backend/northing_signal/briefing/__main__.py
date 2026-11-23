@@ -97,7 +97,7 @@ def run_calibration(store, gold, split, settings):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["collect", "enrich", "analyze", "status", "export", "evaluate", "discover", "recheck", "publish", "token", "users",
-                                            "label", "calibrate"])
+                                            "label", "calibrate", "relate"])
     parser.add_argument("--limit", type=int, default=24)
     parser.add_argument("--database", default=None)
     parser.add_argument("--reference", type=Path)
@@ -155,6 +155,12 @@ def main():
             print(material.model_dump_json(), flush=True)
         return
     service = ContentService(store, settings)
+    if args.command == "relate":
+        # Judge up to --limit candidate pairs of recent events now (each update does 24 itself).
+        run = service.new_run("relate", "grouping")
+        asyncio.run(service.relate_events(run, args.limit))
+        print(json.dumps({"relations": run.get("relations"), "errors": run["errors"]}, ensure_ascii=False))
+        return
     if args.command == "publish":
         try:
             result = service.publish_digest(args.out)

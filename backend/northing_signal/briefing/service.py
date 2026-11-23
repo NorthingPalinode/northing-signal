@@ -25,6 +25,11 @@ from .models import (
     now,
 )
 from .publish import publish
+from .relate import BATCH, MERGING, pair_id
+from .relate import PROMPT as RELATION_PROMPT
+from .relate import candidates as relation_candidates
+from .relate import payload as relation_payload
+from .relate import validate as relation_validator
 from .report import report_range, weekly_report
 from .search_sources import SEARCH_SOURCES, source_access
 from .store import LOCAL_USER
@@ -180,10 +185,7 @@ class ContentService:
         target = self.settings.publish_path(out_dir)
         if target is None:
             raise ValueError("未设置公开日报目录（READER_PUBLISH_DIR 或 --out）")
-        self.assign_events()
-        events = project(self.store.materials(), self.store.judgments(), Preferences(),
-                         membership=self.membership(), refreshed=self.store.refresh_times(),
-                         late_hours=self.late_hours, thresholds=self.thresholds())["events"]
+        events = self.neutral_events()
         return publish(events, target, clock=clock, zone=self.zone(),
                        base_url=getattr(self.settings, "reader_public_url", ""))
 
@@ -324,6 +326,66 @@ class ContentService:
         moving = [m for m, e in self.membership().items() if e == source]
         self.store.regroup({"kind": "merge", "event": source, "into": target, "materials": moving},
                            moving, target, alias=source)
+
+    def neutral_events(self):
+        """Events under default preferences and no reader actions: shared, not personal."""
+        self.assign_events()
+        return project(self.store.materials(), self.store.judgments(), Preferences(),
+                       membership=self.membership(), refreshed=self.store.refresh_times(),
+                       late_hours=self.late_hours, thresholds=self.thresholds())["events"]
+
+    async def relate_events(self, run, limit=None):
+        """Ask the model how similar recent events relate; merge same occurrences and follow-ups.
+
+        Candidates come from relate.candidates (free); each answer is stored, so a pair is never
+        asked twice. A model failure stops this step only; the update itself carries on.
+        """
+        limit = getattr(self.settings, "reader_relation_pairs", 24) if limit is None else limit
+        if not limit or not self.analyzer.configured:
+            return
+        events = await asyncio.to_thread(self.neutral_events)
+        pairs = relation_candidates(events, self.store.relation_pairs(), clock=datetime.now(timezone.utc), limit=limit)
+        checked = merged = 0
+        for start in range(0, len(pairs), BATCH):
+            batch = pairs[start:start + BATCH]
+            ids = [pair_id(older, newer) for _, older, newer in batch]
+            try:
+                answers = await self.analyzer.request_json(
+                    RELATION_PROMPT, relation_payload(batch), relation_validator(ids),
+                    purpose="event_relation", maximum=1800)
+            except ValueError as error:
+                run["errors"].append("relation_" + str(error).removeprefix("intent_"))
+                break
+            rows = []
+            for score, older, newer in batch:
+                answer = answers[pair_id(older, newer)]
+                outcome = None
+                if answer.relation in MERGING:
+                    outcome = await asyncio.to_thread(self.merge_by_model, older["id"], newer["id"], answer)
+                    merged += outcome == "merged"
+                rows.append((older["id"], newer["id"], answer.relation,
+                             {"reason": answer.reason, "recall": score, "outcome": outcome,
+                              "model": getattr(self.settings, "llm_model", "")}))
+                checked += 1
+            self.store.record_relations(rows)
+        run["relations"] = {"checked": checked, "merged": merged}
+
+    def merge_by_model(self, target, source, answer):
+        """Fold the newer event into the older one, unless a reader split either of them."""
+        self.assign_events()
+        target, source = self.resolve(target), self.resolve(source)
+        _, live, _ = self.store.event_state()
+        if target == source or target not in live or source not in live:
+            return "already_together"
+        membership = self.membership()
+        involved = {m for m, e in membership.items() if e in {target, source}}
+        if involved & self.store.split_materials():
+            return "kept_reader_split"
+        moving = [m for m, e in membership.items() if e == source]
+        self.store.regroup({"kind": "model_merge", "event": source, "into": target, "materials": moving,
+                            "relation": answer.relation, "reason": answer.reason},
+                           moving, target, alias=source, method="model")
+        return "merged"
 
     def snapshot_view(self, run=None, user=LOCAL_USER):
         """What a past briefing needs to be re-read: its ranked events, not the whole library."""
@@ -621,6 +683,8 @@ class ContentService:
             candidates = await asyncio.to_thread(self.store.materials)
             candidates.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
             await self.analyze(candidates, run, request.analyze_limit)
+            run["stage"] = "grouping"
+            await self.relate_events(run)
             run["stage"] = "publishing"
             # Shared content, personal briefings: save one for each recently active reader.
             since = (datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_ACTIVE_DAYS)).isoformat()

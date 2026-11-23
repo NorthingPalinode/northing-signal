@@ -47,6 +47,8 @@ class ReaderSettings(BaseSettings):
     # research sources, and for everything else. Set them from `calibrate` on your own labels.
     reader_threshold_official: int = Field(default=9, ge=0, le=24)
     reader_threshold_other: int = Field(default=9, ge=0, le=24)
+    # Event relations judged by the model after each update (pairs per update; 0 turns it off).
+    reader_relation_pairs: int = Field(default=24, ge=0, le=200)
     # Public digest: when set, every completed update also writes the static site here
     # (relative paths are under the project). Empty: publish only with the CLI command.
     reader_publish_dir: str = ""

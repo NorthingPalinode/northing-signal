@@ -140,6 +140,13 @@ MIGRATIONS = [
     CREATE INDEX user_usage_user ON user_usage(user_id, created_at);
     """ + _revision_triggers("interactions", "reader_revision")
         + "\n" + _revision_triggers("follows", "reader_revision")),
+    # Model-judged relations between two events (2026-11-24): every decision is kept, so a pair is
+    # never asked twice. Merges themselves go through event_members/aliases like a reader's.
+    (7, """
+    CREATE TABLE event_relations (
+        a TEXT NOT NULL, b TEXT NOT NULL, relation TEXT NOT NULL, data TEXT NOT NULL,
+        created_at TEXT NOT NULL, PRIMARY KEY(a, b));
+    """),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 SNAPSHOT_KEEP, SNAPSHOT_DAYS = 60, 90
@@ -338,18 +345,36 @@ class Store:
             if backfill:
                 db.execute("INSERT OR REPLACE INTO meta VALUES ('events_backfilled', 1)")
 
-    def regroup(self, change, material_ids, target, frame=None, alias=None):
-        """A reader's split or merge: move materials, optionally retire an id, and log it."""
+    def regroup(self, change, material_ids, target, frame=None, alias=None, method="manual"):
+        """A reader's split or merge (or a model merge): move materials, retire an id, log it."""
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             if frame is not None:
                 db.execute("INSERT INTO events VALUES (?, ?, ?)", (target, self.encoded(frame), now()))
-            db.executemany("UPDATE event_members SET event_id=?, method='manual', score=NULL WHERE material_id=?",
-                           [(target, material) for material in material_ids])
+            db.executemany("UPDATE event_members SET event_id=?, method=?, score=NULL WHERE material_id=?",
+                           [(target, method, material) for material in material_ids])
             if alias:
                 db.execute("INSERT OR REPLACE INTO event_aliases VALUES (?, ?)", (alias, target))
                 db.execute("UPDATE event_aliases SET new_id=? WHERE new_id=?", (target, alias))
             db.execute("INSERT INTO event_changes(data, created_at) VALUES (?, ?)", (self.encoded(change), now()))
+
+    def relation_pairs(self):
+        """Every pair of event ids the model has judged, as frozensets."""
+        with self.connection() as db:
+            return {frozenset((r["a"], r["b"])) for r in db.execute("SELECT a, b FROM event_relations")}
+
+    def record_relations(self, rows):
+        """rows: (event id, event id, relation, details)."""
+        with self.connection() as db:
+            db.executemany("INSERT OR IGNORE INTO event_relations VALUES (?, ?, ?, ?, ?)",
+                           [(*sorted((a, b)), relation, self.encoded(data), now()) for a, b, relation, data in rows])
+
+    def split_materials(self):
+        """Materials a reader split out of an event: a model merge never undoes that."""
+        with self.connection() as db:
+            rows = db.execute("SELECT data FROM event_changes").fetchall()
+        return {change["material"] for change in map(lambda r: json.loads(r["data"]), rows)
+                if change.get("kind") == "split" and change.get("material")}
 
     def source_state(self, source_id, value):
         with self.connection() as db:
