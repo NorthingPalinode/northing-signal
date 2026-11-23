@@ -24,12 +24,13 @@ async def analyze_pending(service, limit, reference=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["collect", "enrich", "analyze", "status", "export", "evaluate", "discover", "recheck"])
+    parser.add_argument("command", choices=["collect", "enrich", "analyze", "status", "export", "evaluate", "discover", "recheck", "publish"])
     parser.add_argument("--limit", type=int, default=24)
     parser.add_argument("--database", default=None)
     parser.add_argument("--reference", type=Path)
     parser.add_argument("--split", choices=["all", "development", "holdout"], default="all")
     parser.add_argument("--query", default="AI agents")
+    parser.add_argument("--out", default=None, help="publish: output directory (default READER_PUBLISH_DIR)")
     args = parser.parse_args()
     if not 0 <= args.limit <= 120:
         parser.error("limit must be between 0 and 120")
@@ -48,6 +49,13 @@ def main():
             print(material.model_dump_json(), flush=True)
         return
     service = ContentService(store, settings)
+    if args.command == "publish":
+        try:
+            result = service.publish_digest(args.out)
+        except ValueError as error:
+            parser.error(str(error))
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return
     if args.command == "recheck":
         from .models import Assessment
         from .understand import POLICY_HASH, validate

@@ -30,6 +30,18 @@ class ReaderSettings(BaseSettings):
     reader_web_api_key: SecretStr = SecretStr("")
     reader_openalex_api_key: SecretStr = SecretStr("")
     reader_x_bearer_token: SecretStr = SecretStr("")
+    # Public digest: when set, every completed update also writes the static site here
+    # (relative paths are under the project). Empty: publish only with the CLI command.
+    reader_publish_dir: str = ""
+    # Address the published site is served from, e.g. https://you.github.io/daily/ (RSS links).
+    reader_public_url: str = ""
+
+    def publish_path(self, value=None):
+        value = value or self.reader_publish_dir
+        if not value:
+            return None
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else self.root / path
 
     @field_validator("reader_timezone")
     @classmethod
