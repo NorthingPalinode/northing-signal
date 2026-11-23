@@ -71,6 +71,9 @@ export type Story = {
   new?: boolean;
   /** An older event that got a new report in the latest update. */
   updated?: boolean;
+  /** Found while it was news. Late finds and undated reports are archived, not "today". */
+  timely?: boolean;
+  stale_reason?: "late" | "undated" | null;
   /** Known before the latest update: it has left the focus. Marked since: only greyed. */
   known_earlier?: boolean;
   score?: number;

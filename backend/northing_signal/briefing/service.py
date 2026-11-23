@@ -59,6 +59,8 @@ class ContentService:
     def __init__(self, store, settings):
         self.store, self.settings = store, settings
         self.sources = json.loads((settings.root / "data/briefing_sources.json").read_text("utf-8"))["sources"]
+        # Sources whose reports arrive late by nature (curated paper lists) get a longer window.
+        self.late_hours = {s["id"]: s["late_hours"] for s in self.sources if "late_hours" in s}
         self.analyzer = Analyzer(store, settings,
                                  requests_per_day=getattr(settings, "reader_requests_per_day", None),
                                  tokens_per_day=getattr(settings, "reader_tokens_per_day", None))
@@ -90,6 +92,7 @@ class ContentService:
         interactions = self.attribute(self.store.interactions(user=user), membership)
         latest = self.store.last_refresh(completed=True)
         bounds = dict(briefing_at=latest["finished_at"], new_since=latest["started_at"]) if latest else {}
+        bounds.update(refreshed=self.store.refresh_times(), late_hours=self.late_hours)
         value = project(materials, judgments, preferences, interactions, membership=membership, **bounds)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
         saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
@@ -174,7 +177,8 @@ class ContentService:
             raise ValueError("未设置公开日报目录（READER_PUBLISH_DIR 或 --out）")
         self.assign_events()
         events = project(self.store.materials(), self.store.judgments(), Preferences(),
-                         membership=self.membership())["events"]
+                         membership=self.membership(), refreshed=self.store.refresh_times(),
+                         late_hours=self.late_hours)["events"]
         return publish(events, target, clock=clock, zone=self.zone(),
                        base_url=getattr(self.settings, "reader_public_url", ""))
 

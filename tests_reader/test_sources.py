@@ -200,3 +200,13 @@ def test_arxiv_fixed_feeds_and_discovery_share_serial_request_spacing(monkeypatc
                              collection.fetch("https://rss.arxiv.org/rss/cs.AI", {"rss.arxiv.org"}))
     asyncio.run(scenario())
     assert calls == [0.0, 3.0]
+
+
+def test_every_model_catalog_is_told_a_card_is_not_a_launch():
+    from northing_signal.briefing.understand import PROMPT, is_model_card
+    from test_reader import material as fixture
+    assert is_model_card(fixture(source_id="hf-kimi")) and is_model_card(fixture(source_id="modelscope-qwen"))
+    assert is_model_card(fixture(source_id="huggingface-discovery"))
+    assert not is_model_card(fixture(source_id="hf-daily-papers")) and not is_model_card(fixture(source_id="openai"))
+    # The title rules that keep explainers, past launches and model cards from reading as releases.
+    assert "不改写成发布" in PROMPT and "本身不证明刚发布" in PROMPT

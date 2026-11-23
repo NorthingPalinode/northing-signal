@@ -129,11 +129,13 @@ export function sections(
     focus: events.filter((e) => view?.focus.includes(e.id)),
     radar: events.filter((e) => view?.radar.includes(e.id)),
     discover: events.filter((e) => e.qualified && !e.dismissed),
-    /** Qualified stories the briefing did not already show as focus or radar. */
+    /** Qualified news the briefing did not already show as focus or radar. Late finds and
+     * undated reports stay out of the briefing; search still finds them. */
     more: events.filter(
       (e) =>
         e.qualified &&
         !e.dismissed &&
+        e.timely !== false &&
         !view?.focus.includes(e.id) &&
         !view?.radar.includes(e.id),
     ),

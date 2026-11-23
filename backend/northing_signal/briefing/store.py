@@ -550,6 +550,12 @@ class Store:
         return [{**json.loads(r["data"]), **{k: r[k] for k in ("id", "trigger", "state", "started_at", "finished_at")}}
                 for r in rows]
 
+    def refresh_times(self):
+        """Completion times of every completed update, oldest first."""
+        with self.connection() as db:
+            return [r[0] for r in db.execute("""SELECT finished_at FROM refreshes
+                WHERE state='completed' AND finished_at IS NOT NULL ORDER BY finished_at""")]
+
     def last_refresh(self, completed=False):
         rows = self.refreshes(1, completed)
         return rows[0] if rows else None

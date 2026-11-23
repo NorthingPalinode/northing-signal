@@ -172,28 +172,51 @@ def test_weekly_report_endpoint(tmp_path):
         assert client.get("/api/reader/reports/weekly?range=year").status_code == 422
 
 
-def test_undated_reports_earn_no_recency_and_stay_out_of_focus():
-    # Kimi K3 (2026-11-23): an undated model card for a June model ranked first as "today".
+def test_late_and_undated_reports_are_archived_not_news():
+    # Kimi K3 (2026-11-23): a June model card collected in November must not read as today's news.
+    from northing_signal.briefing.engine import timely
+    clock = "2026-11-02T06:00:00+00:00"
     card = material(id="card", url="https://example.org/card", published_at=None,
                     captured_at="2026-11-02T05:00:00+00:00", text="Nova 1 model card.")
-    dated = material(id="dated", url="https://example.org/dated", captured_at="2026-11-02T05:00:00+00:00",
+    late = material(id="late", url="https://example.org/late", published_at="2026-10-20T00:00:00+00:00",
+                    captured_at="2026-11-02T05:00:00+00:00", text="Vega 2 is available.")
+    fresh = material(id="fresh", url="https://example.org/fresh", captured_at="2026-11-02T05:00:00+00:00",
                      published_at="2026-11-02T04:00:00+00:00", text="Orion 3 is available.")
     judgments = {card.version: assessment(subject="Nova", object="Nova 1", event_key="nova-1",
                                           title="Nova 1 发布").model_dump(),
-                 dated.version: assessment(subject="Orion", object="Orion 3", event_key="orion-3",
+                 late.version: assessment(subject="Vega", object="Vega 2", event_key="vega-2",
+                                          title="Vega 2 发布").model_dump(),
+                 fresh.version: assessment(subject="Orion", object="Orion 3", event_key="orion-3",
                                            title="Orion 3 发布").model_dump()}
-    value = project([card, dated], judgments, Preferences(), as_of="2026-11-02T06:00:00+00:00")
+    value = project([card, late, fresh], judgments, Preferences(), as_of=clock,
+                    new_since="2026-11-02T04:30:00+00:00")
     events = {e["title"]: e for e in value["events"]}
-    nova, orion = events["Nova 1 发布"], events["Orion 3 发布"]
-    assert not nova["dated"] and orion["dated"] and nova["score"] < orion["score"]
-    assert nova["id"] not in value["focus"] and nova["id"] in value["radar"]  # still readable, below the focus
-    assert orion["id"] in value["focus"]
-    # A dated report of the same event gives it that date.
-    review = material(id="review", url="https://example.org/review", source_id="lab", source_name="Lab",
-                      captured_at="2026-11-02T05:30:00+00:00", published_at="2026-06-13T00:00:00+00:00",
-                      text="Nova 1 model card. A review.")
-    judgments[review.version] = assessment(subject="Nova", object="Nova 1", event_key="nova-1",
-                                           title="Nova 1 发布", action="test").model_dump()
-    later = project([card, dated, review], judgments, Preferences(), as_of="2026-11-02T06:00:00+00:00")
-    nova = next(e for e in later["events"] if e["title"] == "Nova 1 发布")
-    assert nova["dated"] and nova["earliest_published_at"].startswith("2026-06-13")
+    assert events["Nova 1 发布"]["stale_reason"] == "undated" and events["Vega 2 发布"]["stale_reason"] == "late"
+    assert events["Orion 3 发布"]["timely"] and events["Orion 3 发布"]["new"]
+    shown = set(value["focus"]) | set(value["radar"])
+    assert shown == {events["Orion 3 发布"]["id"]}
+    assert not events["Nova 1 发布"]["new"] and not events["Vega 2 发布"]["new"]  # no 【新】 for late finds
+    # Days the service was off do not make their news old: the window starts at the update before.
+    off = material(published_at="2026-10-28T00:00:00+00:00", captured_at="2026-11-02T05:00:00+00:00")
+    assert not timely(off)
+    assert timely(off, refreshed=[stamp_("2026-10-27T12:00:00+00:00")])
+    # A curated list that lags by nature gets its own window.
+    paper = material(published_at="2026-10-29T00:00:00+00:00", captured_at="2026-11-02T05:00:00+00:00")
+    assert not timely(paper) and timely(paper, hours=168)
+
+
+def test_an_old_report_found_late_does_not_mark_an_event_updated():
+    first = material(id="first", captured_at="2026-11-01T01:00:00+00:00")
+    old_copy = material(id="old-copy", url="https://example.org/old-copy", source_id="blog", source_name="Blog",
+                        published_at="2026-09-01T00:00:00+00:00", captured_at="2026-11-02T05:10:00+00:00",
+                        text="Atlas 2 is available. Free for research. A blog recap.")
+    judgments = {first.version: assessment().model_dump(), old_copy.version: assessment().model_dump()}
+    value = project([first, old_copy], judgments, Preferences(), as_of="2026-11-02T06:00:00+00:00",
+                    new_since="2026-11-02T05:00:00+00:00")
+    event = value["events"][0]
+    assert event["report_count"] == 2 and event["timely"] and not event["updated"]
+
+
+def stamp_(value):
+    from northing_signal.briefing.engine import stamp
+    return stamp(value)

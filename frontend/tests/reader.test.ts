@@ -72,9 +72,12 @@ test("news is newest first within each section and respects filters", () => {
 });
 
 test("more lists qualified stories outside focus and radar", () => {
-  const events = [story("a"), story("b"), story("c"), story("d", { qualified: false }), story("e", { dismissed: true })];
+  const events = [story("a"), story("b"), story("c"), story("d", { qualified: false }), story("e", { dismissed: true }),
+    story("f", { timely: false, stale_reason: "late" })];
   const value = view(events, { focus: ["a"], radar: ["b"] });
   assert.deepEqual(sections(value, "", "", "").more.map((e) => e.id), ["c"]);
+  // A late find stays searchable (Kimi K3, 2026-11-24).
+  assert.ok(sections(value, "", "", "").discover.some((e) => e.id === "f"));
 });
 
 test("discover hides unqualified and dismissed stories", () => {

@@ -62,14 +62,37 @@ def active_actions(interactions):
     return [r for r in interactions if r["request_id"] not in retracted and r["kind"] != "retract"]
 
 
+LATE_HOURS = 48  # found later than this after publication: archived, not news (AIHOT's rule)
+
+
+def timely(material, refreshed=(), hours=LATE_HOURS):
+    """Was this report found while it was news? Undated reports never are.
+
+    The window counts from the update before the capture, not the capture itself, so days
+    the service was off do not turn the news of those days into old news. A new source's
+    first import (its back catalogue) and old articles found by search stay late.
+    refreshed: sorted completion times of earlier updates.
+    """
+    published, captured = stamp(material.published_at), stamp(material.captured_at)
+    if not published or not captured:
+        return False
+    before = [t for t in refreshed if t < captured]
+    since = before[-1] if before else captured
+    return published >= since - timedelta(hours=hours)
+
+
 def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
-            briefing_at=None, new_since=None):
+            briefing_at=None, new_since=None, refreshed=(), late_hours=None):
     """membership: material id -> stored event id. Without it, events are derived as before.
 
     briefing_at: when the current briefing was made (the latest completed update). "Known" marked
     after it greys the story but only leaves the focus at the next update, so a briefing does not
     reshuffle while it is read. new_since: start of that update; events first captured since are new.
+    refreshed: completion times of earlier updates; late_hours: source id -> hours a report may
+    take to be found and still count as news (default LATE_HOURS).
     """
+    refreshed = sorted(t for t in (stamp(v) if isinstance(v, str) else v for v in refreshed) if t)
+    late_hours = late_hours or {}
     settled = stamp(briefing_at) if briefing_at else None
     fresh_from = stamp(new_since) if new_since else None
     clock = stamp(as_of) if as_of else datetime.now(timezone.utc)
@@ -140,6 +163,11 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         # publication date among the reports the event earns no recency and stays out of focus.
         published = [d for m, _, _ in members if (d := stamp(m.published_at))]
         dated = bool(published)
+        # News only when some report was found while fresh: late finds and undated reports
+        # are archived under their own date, searchable, but never "today" (2026-11-24).
+        found_fresh = [m for m, _, _ in members
+                       if timely(m, refreshed, late_hours.get(m.source_id, LATE_HOURS))]
+        is_timely = bool(found_fresh)
         date = stamp(material.published_at) or (min(published) if published else stamp(material.captured_at))
         age_days = max(0, (clock - date).total_seconds() / 86400)
         version = material.version
@@ -183,12 +211,14 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
             "known_earlier": known_earlier, "first_captured_at": first_captured,
-            "latest_captured_at": latest_captured, "dated": dated,
+            "latest_captured_at": latest_captured, "dated": dated, "timely": is_timely,
+            "stale_reason": None if is_timely else "late" if dated else "undated",
             "earliest_published_at": min(published).isoformat() if published else None,
-            # New: first seen in the latest update. Updated: an older event that got a new report in it.
-            "new": bool(fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
+            # New: first seen in the latest update. Updated: an older event that got a new report in
+            # it. Both only for news found while fresh: a late find is neither.
+            "new": bool(is_timely and fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
             "updated": bool(fresh_from and stamp(first_captured) and stamp(first_captured) < fresh_from
-                            and stamp(latest_captured) and stamp(latest_captured) >= fresh_from),
+                            and any(stamp(m.captured_at) >= fresh_from for m in found_fresh)),
             "saved": any(r["kind"] == "saved" for r in actions if r["event_id"] == event_id),
             "relevant": relevant, "score": round(score, 2), "timeline": timeline,
             "age_days": round(age_days, 1),
@@ -201,7 +231,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         })
     events.sort(key=lambda row: (not row["protected"], -row["score"], row["id"]))
     eligible = [e for e in events if e["qualified"] and not e["dismissed"] and not e["known_earlier"]
-                and (e["relevant"] or preferences.exploration) and (e["age_days"] <= 30 or e["protected"])]
+                and (e["relevant"] or preferences.exploration) and (e["age_days"] <= 30 or e["protected"])
+                and (e["timely"] or e["protected"])]
     focus, radar, spent = [], [], 0
     topic_counts = defaultdict(int)
     budget = preferences.budget_minutes * 60
@@ -225,8 +256,6 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         return True
 
     for event in eligible:
-        if not event["dated"] and not event["protected"]:
-            continue  # undated: may still appear below the focus, marked as collected-at
         if not adds_information(event):
             continue
         if len(focus) >= 6 or spent + event["reading_seconds"] > budget * 0.7:
@@ -239,7 +268,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         selected.append(event)
         spent += event["reading_seconds"]
         topic_counts[event["topic"]] += 1
-    for event in sorted(eligible, key=lambda e: not e["dated"]):  # stable: dated first, by score
+    for event in eligible:
         if event["id"] in focus or len(radar) >= 8 or spent + 15 > budget or not adds_information(event):
             continue
         radar.append(event["id"])

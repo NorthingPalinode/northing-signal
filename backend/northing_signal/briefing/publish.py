@@ -47,8 +47,8 @@ def public_events(events, since, clock):
         latest = stamp(event.get("latest_captured_at") or event.get("captured_at"))
         if not event.get("qualified") or not latest or not since < latest <= clock:
             continue
-        if not event.get("dated", True) and not event.get("protected"):
-            continue  # no publication date: collection time cannot make it news
+        if not event.get("timely", True) and not event.get("protected"):
+            continue  # found late or undated: archived, not news
         when = stamp(event.get("published_at")) or stamp(event.get("earliest_published_at")) or event_time(event)
         if when and clock - when > timedelta(days=MAX_AGE_DAYS) and not event.get("protected"):
             continue

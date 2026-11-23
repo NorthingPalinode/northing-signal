@@ -496,6 +496,7 @@
     },
     {
       "id": "hf-daily-papers",
+      "late_hours": 168,
       "name": "Hugging Face · Daily Papers",
       "role": "community",
       "url": "https://huggingface.co/api/daily_papers?limit=8",

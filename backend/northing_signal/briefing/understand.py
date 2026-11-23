@@ -20,6 +20,13 @@ PROMPT = """你是面向 AI 技术开发者和 AI 重度读者的克制的中文
 subject/object 用明确具体的主体和产品版本；event_key 用英文小写短键，描述具体产品/研究事件，
 同一模型发布及其直接测试/更正共享键；同公司不同产品或不同版本不能共享；不确定则使用该材料 id。
 中文标题客观具体，摘要说明新增事实和关键限制；不要沿用震撼、颠覆、最强等宣传词。
+标题必须点出主体（模型、产品、公司或项目名）；原标题只有版本号或代号时，用来源名或正文里真实出现的名字补全，
+找不到具体名字就用上位词，不凭常识补型号、版本或数字。
+动作以原文为界：原文是 How/Why/Guide/教程/分析/评测时，标题保留这一类型，不改写成发布、推出、上线或开源；
+原文把发布写成过去的事（如“上周我们发布了”“At DevDay we introduced”），本条讲用法、演示或再次介绍时，
+标题写介绍或演示，action 用 explain，不用 release。只有原文明确宣布此刻发布、推出、上线或开源，才用 release。
+模型卡、仓库主页、文档页和更新日志页描述的是已存在的对象，本身不证明刚发布：除非材料写明这是首次发布并给出时间，
+action 不用 release，标题写“模型卡”“介绍”或具体更新内容，不写“发布”。
 原文英文时准确译成中文，产品名、数字、日期、单位保留原写法，不换算、不补年份。
 significance/novelty/usefulness 为 0..4：普通转述/推广0..1，具体有用变化2..3，重大变化4。
 研究、底层优化、检索、部署成本、可复用教程都能有价值；不可立即使用不等于不重要。
@@ -36,6 +43,17 @@ limitations 简洁写材料中的限制或当前缺失，不机械添加泛泛�
 Schema：
 """ + json.dumps(Assessment.model_json_schema(), ensure_ascii=False)
 POLICY_HASH = digest([POLICY, PROMPT])[:16]
+
+
+def is_model_card(material):
+    """Model catalog entries and cards (Hugging Face, ModelScope): an existing model, not a launch.
+
+    The fixed catalogs (hf-<org>, modelscope-<org>) were missing here, so the June Kimi K3 card
+    read as a release in November (2026-11-23). Daily Papers is a paper list, not a catalog.
+    """
+    source = material.source_id
+    return (source == "huggingface-discovery" or source.startswith("modelscope-")
+            or (source.startswith("hf-") and source != "hf-daily-papers"))
 
 
 def squash(value):
@@ -194,7 +212,7 @@ class Analyzer:
         payload = [{"id": m.version, "title": m.title, "text": m.text,
                     "evidence_note": "只从 text 连续摘录。title 不是证据正文，禁止把标题复制到 quote。",
                     "material_kind": m.content_kind,
-                    "source_boundary": "研究索引收录的摘要，不是论文全文，主张仅限索引摘要。" if m.content_kind == "index_abstract" else "社区发言，不代表官方或独立验证。" if m.content_kind == "community_post" else "作者模型卡，不等于刚发布，不把检索或更新时间当发布日期。" if m.source_id == "huggingface-discovery" else "仅依据所提供节选，不推断全文。",
+                    "source_boundary": "研究索引收录的摘要，不是论文全文，主张仅限索引摘要。" if m.content_kind == "index_abstract" else "社区发言，不代表官方或独立验证。" if m.content_kind == "community_post" else "作者模型卡，不等于刚发布，不把检索或更新时间当发布日期。" if is_model_card(m) else "仅依据所提供节选，不推断全文。",
                     "source": m.source_name, "role": m.source_role, "published_at": m.published_at}
                    for m in materials]
         user = json.dumps(payload, ensure_ascii=False)
