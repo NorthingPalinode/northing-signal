@@ -81,6 +81,29 @@ def timely(material, refreshed=(), hours=LATE_HOURS):
     return published >= since - timedelta(hours=hours)
 
 
+# Event heat (AIHOT's rule): independent sources reporting within 48 h, each source once at its
+# first report, halving every 24 h. Ten articles from one outlet count once.
+HEAT_WINDOW, HEAT_HALF_LIFE, RISING_LOOKBACK = timedelta(hours=48), 24.0, timedelta(hours=6)
+
+
+def heat(reports, at):
+    """reports: (source id, report time) of news found while fresh. Returns (heat, sources)."""
+    first = {}
+    for source, when in reports:
+        if when <= at and at - when <= HEAT_WINDOW:
+            first[source] = min(first.get(source, when), when)
+    value = sum(0.5 ** ((at - when).total_seconds() / 3600 / HEAT_HALF_LIFE) for when in first.values())
+    return round(value, 2), first
+
+
+def heat_trend(reports, at):
+    """"rising": two or more sources now, at least one of them new in the last six hours."""
+    _, now_sources = heat(reports, at)
+    _, earlier = heat(reports, at - RISING_LOOKBACK)
+    joined = set(now_sources) - set(earlier)
+    return "rising" if len(now_sources) >= 2 and joined and earlier else None
+
+
 def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
             briefing_at=None, new_since=None, refreshed=(), late_hours=None):
     """membership: material id -> stored event id. Without it, events are derived as before.
@@ -182,6 +205,10 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         protected = a.action in {"correction", "withdrawal"} and not known_earlier
         score = value + (7 if relevant else -3) + (3 * math.exp(-age_days / 7) if dated else 0)
         score += max(-3, min(3, affinities[a.topic]))
+        reports = [(m.source_id, stamp(m.published_at)) for m in found_fresh]
+        heat_value, _ = heat(reports, clock)
+        # Many outlets reporting it now: a bounded lift, at most +4 (from the second source on).
+        score += min(4, 2 * max(0, heat_value - 1))
         if preferences.depth == "technical" and a.content_type in {"research", "test", "tutorial"}:
             score += 3
         if preferences.depth == "overview" and a.content_type in {"release", "industry"}:
@@ -192,7 +219,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             score -= 20
         timeline = [{"version": m.version, "title": b.title or m.title, "summary": b.summary,
                      "source": m.source_name, "role": m.source_role, "url": m.url,
-                     "published_at": m.published_at, "action": b.action,
+                     "published_at": m.published_at, "captured_at": m.captured_at, "action": b.action,
                      "content_kind": m.content_kind,
                      "evidence": b.evidence, "claims": [c.model_dump() for c in b.claims],
                      "conditions": b.conditions, "limitations": b.limitations}
@@ -213,6 +240,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "known_earlier": known_earlier, "first_captured_at": first_captured,
             "latest_captured_at": latest_captured, "dated": dated, "timely": is_timely,
             "stale_reason": None if is_timely else "late" if dated else "undated",
+            "heat": heat_value, "heat_trend": heat_trend(reports, clock),
             "earliest_published_at": min(published).isoformat() if published else None,
             # New: first seen in the latest update. Updated: an older event that got a new report in
             # it. Both only for news found while fresh: a late find is neither.

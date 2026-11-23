@@ -182,6 +182,11 @@ function StoryRow({
           {story.protected && (
             <span className="r-badge warn">重要{actionLabel[story.action]}</span>
           )}
+          {story.heat_trend === "rising" && (
+            <span className="r-badge accent" title="最近 6 小时有新的来源开始报道">
+              热度上升
+            </span>
+          )}
           <span className="r-meta-text">
             {[
               story.source +

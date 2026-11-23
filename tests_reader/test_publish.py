@@ -44,7 +44,7 @@ def test_reader_actions_never_reach_the_public_digest(tmp_path):
     assert not {"actions", "saved", "known", "dismissed", "score", "claims", "timeline"} & set(entry)
     page = (out / "index.html").read_text("utf-8")
     assert "Atlas 2 is available." not in page  # original quotes and excerpts stay local
-    assert "Atlas 2 发布" in page and "最重要的 1 件事" in page
+    assert "Atlas 2 发布" in page and "<h2>头条</h2>" in page
 
 
 def test_each_edition_holds_only_what_arrived_since_the_last_one(tmp_path):
@@ -66,7 +66,9 @@ def test_each_edition_holds_only_what_arrived_since_the_last_one(tmp_path):
     assert second["count"] == 2
     edition = json.loads((out / "editions" / f"{second['edition']}.json").read_text("utf-8"))
     status = {e["title"]: e["status"] for e in edition["events"]}
-    assert status == {"Nova 1 发布": "new", "Atlas 2 发布": "updated"}
+    # Atlas was in the first edition: its new test report makes it a follow-up, still in the
+    # main list because the lab's own test is a party action.
+    assert status == {"Nova 1 发布": "new", "Atlas 2 发布": "followup"}
     atlas = next(e for e in edition["events"] if e["title"] == "Atlas 2 发布")
     assert atlas["source_count"] == 2 and len(atlas["sources"]) == 2
     index = (out / "index.html").read_text("utf-8")
@@ -134,3 +136,44 @@ def test_undated_stories_are_not_published_as_news(tmp_path):
     store, service = make(tmp_path)
     add(store, material(published_at=None))
     assert service.publish_digest(tmp_path / "site", clock=at(2, 0))["count"] == 0
+
+
+def story(key, *, score=20, source="Outlet", repeat_party=None, sources=1, official=False, heat=1):
+    """A projected event as the digest sees it."""
+    timeline = [{"source": source, "role": "official" if official else "media", "url": f"https://example.org/{key}",
+                 "published_at": "2026-11-02T05:00:00+00:00", "captured_at": "2026-11-02T06:00:00+00:00",
+                 "action": repeat_party or "release"}]
+    return {"id": key, "version": key, "title": key, "summary": "", "reason": "", "topic": "models",
+            "topic_label": "模型与多模态", "qualified": True, "timely": True, "protected": False,
+            "score": score, "heat": heat, "source": source, "source_id": source, "source_count": sources,
+            "url": f"https://example.org/{key}", "published_at": "2026-11-02T05:00:00+00:00",
+            "latest_captured_at": "2026-11-02T06:00:00+00:00", "first_captured_at": "2026-11-02T06:00:00+00:00",
+            "timeline": timeline, "limitations": [], "action": "release", "evidence": "source_attributed"}
+
+
+def test_editorial_rules_cap_outlets_and_keep_repeats_out_of_the_main_list():
+    from northing_signal.briefing.publish import MAIN_LIMIT, QUICK_LIMIT, compose
+    since, clock = at(2, 0), at(2, 12)
+    events = [story("seen-again", score=40), story("seen-party", score=39, official=True, repeat_party="test"),
+              story("seen-wide", score=38, sources=4)]
+    events += [story(f"a{i}", score=30 - i, source="Big outlet") for i in range(3)]
+    events += [story(f"n{i}", score=20 - i, source=f"Outlet {i}") for i in range(14)]
+    placed = {e["id"]: (section, followup) for e, section, followup in
+              compose(events, since, clock, recent_ids={"seen-again", "seen-party", "seen-wide"})}
+    # Reported recently: back in the main list only on the party's own action or wide coverage.
+    assert placed["seen-again"] == ("quick", True)
+    assert placed["seen-party"] == ("main", True) and placed["seen-wide"] == ("main", True)
+    # One outlet at most twice in the main list; its third story waits in the quick list.
+    assert [placed[f"a{i}"][0] for i in range(3)] == ["main", "main", "quick"]
+    sections = [section for section, _ in placed.values()]
+    assert sections.count("main") == MAIN_LIMIT and sections.count("quick") == QUICK_LIMIT
+
+
+def test_an_edition_reads_as_headline_highlights_and_quick_items(tmp_path):
+    from northing_signal.briefing.publish import publish
+    events = [story(f"n{i}", score=30 - i, source=f"Outlet {i}") for i in range(16)]
+    out = tmp_path / "site"
+    assert publish(events, out, clock=at(2, 12))["count"] == 15
+    page = (out / "index.html").read_text("utf-8")
+    order = [page.index(h) for h in ("<h2>头条</h2>", "<h2>今日看点</h2>", "模型与多模态（6）", "快讯（5）")]
+    assert order == sorted(order)

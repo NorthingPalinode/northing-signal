@@ -29,8 +29,16 @@ DISCLAIMER = ("摘要由 AI 依据当时取得的原文节选整理，可能有�
               "依据类型区分来源陈述、文中报告的测试与作者观点，均不等于本项目独立验证。")
 FIRST_WINDOW = timedelta(hours=48)  # the first edition looks back this far
 MAX_AGE_DAYS = 7                    # older stories newly collected are not "news" (corrections excepted)
-EDITION_LIMIT = 15
-TOP_COUNT = 3
+# Editorial rules adapted from AIHOT's daily report, no model calls. 15 items in all (the owner's
+# edition size, 2026-11-23): a main list with a headline and highlights, then one-line quick items.
+MAIN_LIMIT, QUICK_LIMIT = 10, 5
+EDITION_LIMIT = MAIN_LIMIT + QUICK_LIMIT
+HIGHLIGHTS = 3          # after the headline
+SOURCE_CAP = 2          # one outlet at most this often in the main list
+REPEAT_EDITIONS = 7     # stories featured this recently return to the main list only on real news
+FOLLOWUP_SOURCES = 4    # ... meaning: this many outlets, or the party itself acting again
+PARTY_ACTIONS = {"release", "update", "test", "correction", "withdrawal"}
+TOP_COUNT = 1 + HIGHLIGHTS
 ARCHIVE_LINKS = 30
 FEED_ITEMS = 30
 
@@ -38,6 +46,36 @@ FEED_ITEMS = 30
 def safe_url(value):
     value = (value or "").strip()
     return value if urlsplit(value).scheme in {"http", "https"} else ""
+
+
+def compose(events, since, clock, recent_ids=frozenset()):
+    """[(event, section, follow-up)] for one edition, main list first.
+
+    A story featured in the last editions goes back into the main list only when its own party
+    acts again (an official report of a release, update, test or correction since `since`) or
+    FOLLOWUP_SOURCES outlets carry it; otherwise it is a quick item. Rank: the neutral score,
+    heat and an official original, follow-ups lower. One outlet at most SOURCE_CAP main items.
+    """
+    ranked = []
+    for event in public_events(events, since, clock):
+        fresh = [t for t in event.get("timeline", [])
+                 if (captured := stamp(t.get("captured_at"))) and since < captured <= clock]
+        repeat = event["id"] in recent_ids
+        strong = (event.get("protected") or event.get("source_count", 1) >= FOLLOWUP_SOURCES
+                  or any(t.get("role") == "official" and t.get("action") in PARTY_ACTIONS for t in fresh))
+        official = any(t.get("role") == "official" for t in event.get("timeline", []))
+        weight = event.get("score", 0) + 2 * event.get("heat", 0) + (2 if official else 0) - (3 if repeat else 0)
+        ranked.append((weight, event, repeat, strong))
+    ranked.sort(key=lambda r: (not r[1].get("protected"), -r[0], r[1]["id"]))
+    main, quick, per_source = [], [], {}
+    for _, event, repeat, strong in ranked:
+        source = event.get("source", "")
+        if len(main) < MAIN_LIMIT and (strong or not repeat) and per_source.get(source, 0) < SOURCE_CAP:
+            main.append((event, "main", repeat))
+            per_source[source] = per_source.get(source, 0) + 1
+        elif len(quick) < QUICK_LIMIT:
+            quick.append((event, "quick", repeat))
+    return main + quick
 
 
 def public_events(events, since, clock):
@@ -54,10 +92,10 @@ def public_events(events, since, clock):
             continue
         chosen.append(event)
     chosen.sort(key=lambda e: (not e.get("protected"), -e.get("score", 0), e["id"]))
-    return chosen[:EDITION_LIMIT]
+    return chosen
 
 
-def public_entry(event, since):
+def public_entry(event, since, section="main", followup=False):
     """Only the fields a public page shows; no reader state, excerpts or quotes."""
     first = stamp(event.get("first_captured_at"))
     sources, seen = [], set()
@@ -76,7 +114,8 @@ def public_entry(event, since):
         "published_at": when.isoformat() if when else None,
         "source_count": event.get("source_count", 1),
         "status": "correction" if event.get("action") in {"correction", "withdrawal"}
-        else "updated" if first and first <= since else "new",
+        else "followup" if followup else "updated" if first and first <= since else "new",
+        "section": section, "heat": event.get("heat", 0),
         "limitations": list(event.get("limitations", []))[:3], "sources": sources[:6],
     }
 
@@ -92,9 +131,13 @@ def load_editions(out_dir):
     return editions
 
 
-def make_edition(events, previous, clock, zone=None):
+def make_edition(events, earlier, clock, zone=None):
+    """earlier: the editions already published, oldest first."""
+    previous = earlier[-1] if earlier else None
     since = stamp(previous["generated_at"]) if previous else clock - FIRST_WINDOW
-    entries = [public_entry(e, since) for e in public_events(events, since, clock)]
+    recent_ids = {e["id"] for edition in earlier[-REPEAT_EDITIONS:] for e in edition["events"]}
+    entries = [public_entry(event, since, section, followup)
+               for event, section, followup in compose(events, since, clock, recent_ids)]
     return {"id": clock.astimezone(zone).strftime("%Y-%m-%d-%H%M"), "generated_at": clock.isoformat(),
             "since": since.isoformat(), "events": entries,
             "counts": {"events": len(entries), "sources": len({e["source"] for e in entries})}}
@@ -109,7 +152,7 @@ def publish(events, out_dir, *, clock=None, zone=None, base_url=""):
     out_dir = Path(out_dir)
     (out_dir / "editions").mkdir(parents=True, exist_ok=True)
     editions = load_editions(out_dir)
-    edition = make_edition(events, editions[-1] if editions else None, clock, zone)
+    edition = make_edition(events, editions, clock, zone)
     if edition["events"]:
         (out_dir / "editions" / f"{edition['id']}.json").write_text(
             json.dumps(edition, ensure_ascii=False, indent=1), "utf-8")
@@ -149,7 +192,8 @@ def _date(value, zone):
     return f"{local.month}月{local.day}日" if local else "时间未确认"
 
 
-BADGES = {"new": ("新", "new"), "updated": ("有更新", "updated"), "correction": ("更正", "correction")}
+BADGES = {"new": ("新", "new"), "updated": ("有更新", "updated"), "followup": ("跟进", "updated"),
+          "correction": ("更正", "correction")}
 
 
 def _meta(entry, zone):
@@ -206,7 +250,16 @@ padding:0 8px;vertical-align:2px;white-space:nowrap}.badge.new{color:var(--new)}
 details ul{margin:4px 0 8px;padding-left:20px}details p{margin:8px 0 0}
 .empty{color:var(--muted);padding:32px 0}footer{margin-top:48px;font-size:13px;color:var(--muted)}
 footer ul{padding-left:20px}
+.quick{list-style:none;padding:0;margin:0}.quick li{padding:10px 0;border-bottom:1px solid var(--line)}
+.quick li:last-child{border-bottom:0}
 """
+
+
+def _quick(entry, zone):
+    badge = '<span class="badge updated">跟进</span> ' if entry["status"] == "followup" else ""
+    title = escape(entry["title"])
+    link = f'<a href="{escape(entry["url"])}" rel="noopener">{title}</a>' if entry["url"] else title
+    return f'<li>{badge}{link} <span class="muted">{_meta(entry, zone)}</span></li>'
 
 
 def render_page(edition, editions, zone, *, prefix):
@@ -221,14 +274,25 @@ def render_page(edition, editions, zone, *, prefix):
     if not entries:
         body.append('<p class="empty">还没有发布内容。</p>')
     else:
-        top, rest = entries[:TOP_COUNT], entries[TOP_COUNT:]
-        body.append(f"<h2>最重要的 {len(top)} 件事</h2>")
-        body += [_article(e, zone, rank=i) for i, e in enumerate(top, 1)]
+        # Editions before the editorial rules have no section: all of them are the main list.
+        main = [e for e in entries if e.get("section", "main") == "main"]
+        quick = [e for e in entries if e.get("section") == "quick"]
+        if main:
+            body.append("<h2>头条</h2>")
+            body.append(_article(main[0], zone, rank=1))
+        if main[1:TOP_COUNT]:
+            body.append("<h2>今日看点</h2>")
+            body += [_article(e, zone, rank=i) for i, e in enumerate(main[1:TOP_COUNT], 2)]
+        rest = main[TOP_COUNT:]
         for topic, label in TOPICS.items():
             group = [e for e in rest if e["topic"] == topic]
             if group:
                 body.append(f"<h2>{escape(label)}（{len(group)}）</h2>")
                 body += [_article(e, zone) for e in group]
+        if quick:
+            body.append(f"<h2>快讯（{len(quick)}）</h2><ul class=\"quick\">")
+            body += [_quick(e, zone) for e in quick]
+            body.append("</ul>")
     others = [e for e in reversed(editions) if not edition or e["id"] != edition["id"]][:ARCHIVE_LINKS]
     footer = [f"<footer><p>{DISCLAIMER}</p>"]
     if others:

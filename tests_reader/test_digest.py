@@ -220,3 +220,41 @@ def test_an_old_report_found_late_does_not_mark_an_event_updated():
 def stamp_(value):
     from northing_signal.briefing.engine import stamp
     return stamp(value)
+
+
+def test_heat_counts_each_outlet_once_and_marks_rising_stories():
+    from datetime import timedelta
+
+    from northing_signal.briefing.engine import heat, heat_trend
+    at = stamp_("2026-11-02T12:00:00+00:00")
+    hours = lambda n: at - timedelta(hours=n)  # noqa: E731
+    # One outlet's ten articles count once; a second outlet adds; reports older than 48 h do not.
+    one_outlet = [("decoder", hours(1))] * 10
+    assert heat(one_outlet, at)[0] == heat([("decoder", hours(1))], at)[0]
+    two = heat([("decoder", hours(1)), ("qbitai", hours(2)), ("old", hours(50))], at)
+    assert set(two[1]) == {"decoder", "qbitai"} and 1.8 < two[0] < 2
+    assert heat([("decoder", hours(24))], at)[0] == 0.5  # halves each day
+    # Rising: a second outlet joined in the last six hours.
+    assert heat_trend([("decoder", hours(20)), ("qbitai", hours(2))], at) == "rising"
+    assert heat_trend([("decoder", hours(20)), ("qbitai", hours(10))], at) is None
+    assert heat_trend([("decoder", hours(2)), ("qbitai", hours(1))], at) is None  # nothing before: just new
+
+
+def test_a_story_many_outlets_report_ranks_above_an_equal_single_report():
+    clock = "2026-11-02T12:00:00+00:00"
+    solo = material(id="solo", url="https://example.org/solo", published_at="2026-11-02T08:00:00+00:00",
+                    captured_at="2026-11-02T09:00:00+00:00", text="Orion 3 is available.")
+    items = [solo]
+    judgments = {solo.version: assessment(subject="Orion", object="Orion 3", event_key="orion-3",
+                                          title="Orion 3 发布").model_dump()}
+    for index, outlet in enumerate(["a", "b", "c"]):
+        report = material(id="nova-" + outlet, url=f"https://example.org/nova-{outlet}", source_id=outlet,
+                          source_name=outlet, published_at="2026-11-02T08:00:00+00:00",
+                          captured_at=f"2026-11-02T09:0{index}:00+00:00", text=f"Nova 1 is available. {outlet}")
+        items.append(report)
+        judgments[report.version] = assessment(subject="Nova", object="Nova 1", event_key="nova-1",
+                                               title="Nova 1 发布").model_dump()
+    events = {e["title"]: e for e in project(items, judgments, Preferences(), as_of=clock)["events"]}
+    nova, orion = events["Nova 1 发布"], events["Orion 3 发布"]
+    assert nova["source_count"] == 3 and nova["heat"] > orion["heat"]
+    assert 3 < nova["score"] - orion["score"] <= 4  # a real lift, bounded at 4
