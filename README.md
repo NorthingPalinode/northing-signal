@@ -231,6 +231,23 @@ LLM_MODEL=your-model
 
 不读取其他项目的密钥、浏览器 Cookie 或私人账户内容。模型理解需求时会接收所提交的描述；内容整理和相关性判断会向配置的模型发送相应材料节选与确认意图。来源检索只发送所选方向的检索词。
 
+## 校准筛选标准
+
+什么内容值得读，最终要由你的判断来定。用自己标注的样本检查 AI 的筛选准不准，再调整门槛（做法参照 AIHOT 的 SelectBench）：
+
+```powershell
+.venv\Scripts\python -m northing_signal.briefing label        # 逐条标注：y 值得 / n 不值得 / e 两可 / k 跳过 / q 保存退出
+.venv\Scripts\python -m northing_signal.briefing calibrate --split development
+.venv\Scripts\python -m northing_signal.briefing calibrate --split holdout   # 调完后最后检查一次
+```
+
+- `label` 从库里抽 120 条已整理的材料（`--n` 可改），六成是分数贴近门槛的难例，官方来源和其他来源交替出现；不显示 AI 的判断，避免先入为主。每答一条立即保存，随时退出、下次接着标。每条材料固定分到开发集或留出集（约 7:3）。
+- 只按「这条值不值得我花时间读」来标，不用管同一件事是否已经选过别的报道。
+- `calibrate` 用已有的 AI 判断计算查准率、查全率、F1、覆盖率和完整准确率，**不调用模型、不花钱**；把门槛从 0 扫到 24，分别给出官方与研究来源、媒体作者与社区来源 F1 最高的门槛，并列出判错的条目。完整报告保存在 `.local/reader-quality/`。
+- 先在开发集上调，最后用留出集检查一次，避免把门槛调成只会做这几道题。结论写进 `.env` 的 `READER_THRESHOLD_OFFICIAL`、`READER_THRESHOLD_OTHER`。
+- 门槛只能整体移动。如果判错的条目分数并不贴近门槛，说明是整理提示词没讲清这类内容为什么重要或不重要，要改提示词，而改了提示词需要重新整理之后，这里的数字才有意义。
+- 标注是你本人的判断，和旧的 `evaluate` 所用的 AI 编写参照集分开保存，不混用。
+
 ## 验证与开发
 
 Windows 日常检查：

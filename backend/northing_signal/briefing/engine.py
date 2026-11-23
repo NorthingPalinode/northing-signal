@@ -63,6 +63,12 @@ def active_actions(interactions):
 
 
 LATE_HOURS = 48  # found later than this after publication: archived, not news (AIHOT's rule)
+SELECT_THRESHOLD = 9  # significance*3 + novelty*2 + usefulness a story needs (see calibrate.py)
+
+
+def threshold_group(role):
+    """A publisher's own words and other sources may need different thresholds (AIHOT's tiers)."""
+    return "official" if role in {"official", "research"} else "other"
 
 
 def timely(material, refreshed=(), hours=LATE_HOURS):
@@ -105,15 +111,17 @@ def heat_trend(reports, at):
 
 
 def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
-            briefing_at=None, new_since=None, refreshed=(), late_hours=None):
+            briefing_at=None, new_since=None, refreshed=(), late_hours=None, thresholds=None):
     """membership: material id -> stored event id. Without it, events are derived as before.
 
     briefing_at: when the current briefing was made (the latest completed update). "Known" marked
     after it greys the story but only leaves the focus at the next update, so a briefing does not
     reshuffle while it is read. new_since: start of that update; events first captured since are new.
     refreshed: completion times of earlier updates; late_hours: source id -> hours a report may
-    take to be found and still count as news (default LATE_HOURS).
+    take to be found and still count as news (default LATE_HOURS). thresholds: threshold group
+    -> minimum score (default SELECT_THRESHOLD), set from the owner's calibration.
     """
+    thresholds = thresholds or {}
     refreshed = sorted(t for t in (stamp(v) if isinstance(v, str) else v for v in refreshed) if t)
     late_hours = late_hours or {}
     settled = stamp(briefing_at) if briefing_at else None
@@ -179,8 +187,9 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
                     a.significance * 3 + a.novelty * 2 + a.usefulness, date)
         material, a, row = max(members, key=priority)
         value = a.significance * 3 + a.novelty * 2 + a.usefulness
+        minimum = thresholds.get(threshold_group(material.source_role), SELECT_THRESHOLD)
         qualified = (bool(a.claims) and a.evidence != "insufficient"
-                     and (value >= 9 or a.action in {"correction", "withdrawal"}))
+                     and (value >= minimum or a.action in {"correction", "withdrawal"}))
         # Collection time says when we saw it, not when it happened: an undated model card or
         # changelog may describe something months old (Kimi K3, 2026-11-23). Without any
         # publication date among the reports the event earns no recency and stays out of focus.

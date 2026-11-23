@@ -43,6 +43,10 @@ class ReaderSettings(BaseSettings):
     reader_cookie_secure: Literal["auto", "always", "never"] = "auto"
     # Extra origins allowed to send changes, comma separated (the site's own origin always is).
     reader_allowed_origins: str = ""
+    # Selection thresholds (significance*3 + novelty*2 + usefulness, 0..24) for official and
+    # research sources, and for everything else. Set them from `calibrate` on your own labels.
+    reader_threshold_official: int = Field(default=9, ge=0, le=24)
+    reader_threshold_other: int = Field(default=9, ge=0, le=24)
     # Public digest: when set, every completed update also writes the static site here
     # (relative paths are under the project). Empty: publish only with the CLI command.
     reader_publish_dir: str = ""

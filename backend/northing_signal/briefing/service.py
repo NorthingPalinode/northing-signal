@@ -92,7 +92,8 @@ class ContentService:
         interactions = self.attribute(self.store.interactions(user=user), membership)
         latest = self.store.last_refresh(completed=True)
         bounds = dict(briefing_at=latest["finished_at"], new_since=latest["started_at"]) if latest else {}
-        bounds.update(refreshed=self.store.refresh_times(), late_hours=self.late_hours)
+        bounds.update(refreshed=self.store.refresh_times(), late_hours=self.late_hours,
+                      thresholds=self.thresholds())
         value = project(materials, judgments, preferences, interactions, membership=membership, **bounds)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
         saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
@@ -141,6 +142,10 @@ class ContentService:
                              "next": upcoming.astimezone(timezone.utc).isoformat()}
         return value
 
+    def thresholds(self):
+        return {"official": getattr(self.settings, "reader_threshold_official", 9),
+                "other": getattr(self.settings, "reader_threshold_other", 9)}
+
     def zone(self):
         name = getattr(self.settings, "reader_timezone", "")
         return ZoneInfo(name) if name else None
@@ -178,7 +183,7 @@ class ContentService:
         self.assign_events()
         events = project(self.store.materials(), self.store.judgments(), Preferences(),
                          membership=self.membership(), refreshed=self.store.refresh_times(),
-                         late_hours=self.late_hours)["events"]
+                         late_hours=self.late_hours, thresholds=self.thresholds())["events"]
         return publish(events, target, clock=clock, zone=self.zone(),
                        base_url=getattr(self.settings, "reader_public_url", ""))
 
