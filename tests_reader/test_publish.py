@@ -128,3 +128,9 @@ def test_publishing_without_a_directory_is_refused(tmp_path):
         assert "READER_PUBLISH_DIR" in str(error)
     else:
         raise AssertionError("expected a refusal")
+
+
+def test_undated_stories_are_not_published_as_news(tmp_path):
+    store, service = make(tmp_path)
+    add(store, material(published_at=None))
+    assert service.publish_digest(tmp_path / "site", clock=at(2, 0))["count"] == 0

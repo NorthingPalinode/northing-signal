@@ -135,7 +135,12 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         value = a.significance * 3 + a.novelty * 2 + a.usefulness
         qualified = (bool(a.claims) and a.evidence != "insufficient"
                      and (value >= 9 or a.action in {"correction", "withdrawal"}))
-        date = stamp(material.published_at) or stamp(material.captured_at)
+        # Collection time says when we saw it, not when it happened: an undated model card or
+        # changelog may describe something months old (Kimi K3, 2026-11-23). Without any
+        # publication date among the reports the event earns no recency and stays out of focus.
+        published = [d for m, _, _ in members if (d := stamp(m.published_at))]
+        dated = bool(published)
+        date = stamp(material.published_at) or (min(published) if published else stamp(material.captured_at))
         age_days = max(0, (clock - date).total_seconds() / 86400)
         version = material.version
         relevant = a.topic in preferences.topics
@@ -147,7 +152,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         latest_captured = max(m.captured_at for m, _, _ in members)
         dismissed = any(r["kind"] in {"irrelevant", "thin", "duplicate"} for r in recent_actions)
         protected = a.action in {"correction", "withdrawal"} and not known_earlier
-        score = value + (7 if relevant else -3) + 3 * math.exp(-age_days / 7)
+        score = value + (7 if relevant else -3) + (3 * math.exp(-age_days / 7) if dated else 0)
         score += max(-3, min(3, affinities[a.topic]))
         if preferences.depth == "technical" and a.content_type in {"research", "test", "tutorial"}:
             score += 3
@@ -178,7 +183,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
             "known_earlier": known_earlier, "first_captured_at": first_captured,
-            "latest_captured_at": latest_captured,
+            "latest_captured_at": latest_captured, "dated": dated,
+            "earliest_published_at": min(published).isoformat() if published else None,
             # New: first seen in the latest update. Updated: an older event that got a new report in it.
             "new": bool(fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
             "updated": bool(fresh_from and stamp(first_captured) and stamp(first_captured) < fresh_from
@@ -219,6 +225,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         return True
 
     for event in eligible:
+        if not event["dated"] and not event["protected"]:
+            continue  # undated: may still appear below the focus, marked as collected-at
         if not adds_information(event):
             continue
         if len(focus) >= 6 or spent + event["reading_seconds"] > budget * 0.7:
@@ -231,7 +239,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         selected.append(event)
         spent += event["reading_seconds"]
         topic_counts[event["topic"]] += 1
-    for event in eligible:
+    for event in sorted(eligible, key=lambda e: not e["dated"]):  # stable: dated first, by score
         if event["id"] in focus or len(radar) >= 8 or spent + 15 > budget or not adds_information(event):
             continue
         radar.append(event["id"])

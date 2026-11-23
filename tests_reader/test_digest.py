@@ -170,3 +170,30 @@ def test_weekly_report_endpoint(tmp_path):
         body = client.get("/api/reader/reports/weekly?range=last_week").json()
         assert body["count"] == 0 and body["markdown"].startswith("# Northing Signal 周报")
         assert client.get("/api/reader/reports/weekly?range=year").status_code == 422
+
+
+def test_undated_reports_earn_no_recency_and_stay_out_of_focus():
+    # Kimi K3 (2026-11-23): an undated model card for a June model ranked first as "today".
+    card = material(id="card", url="https://example.org/card", published_at=None,
+                    captured_at="2026-11-02T05:00:00+00:00", text="Nova 1 model card.")
+    dated = material(id="dated", url="https://example.org/dated", captured_at="2026-11-02T05:00:00+00:00",
+                     published_at="2026-11-02T04:00:00+00:00", text="Orion 3 is available.")
+    judgments = {card.version: assessment(subject="Nova", object="Nova 1", event_key="nova-1",
+                                          title="Nova 1 发布").model_dump(),
+                 dated.version: assessment(subject="Orion", object="Orion 3", event_key="orion-3",
+                                           title="Orion 3 发布").model_dump()}
+    value = project([card, dated], judgments, Preferences(), as_of="2026-11-02T06:00:00+00:00")
+    events = {e["title"]: e for e in value["events"]}
+    nova, orion = events["Nova 1 发布"], events["Orion 3 发布"]
+    assert not nova["dated"] and orion["dated"] and nova["score"] < orion["score"]
+    assert nova["id"] not in value["focus"] and nova["id"] in value["radar"]  # still readable, below the focus
+    assert orion["id"] in value["focus"]
+    # A dated report of the same event gives it that date.
+    review = material(id="review", url="https://example.org/review", source_id="lab", source_name="Lab",
+                      captured_at="2026-11-02T05:30:00+00:00", published_at="2026-06-13T00:00:00+00:00",
+                      text="Nova 1 model card. A review.")
+    judgments[review.version] = assessment(subject="Nova", object="Nova 1", event_key="nova-1",
+                                           title="Nova 1 发布", action="test").model_dump()
+    later = project([card, dated, review], judgments, Preferences(), as_of="2026-11-02T06:00:00+00:00")
+    nova = next(e for e in later["events"] if e["title"] == "Nova 1 发布")
+    assert nova["dated"] and nova["earliest_published_at"].startswith("2026-06-13")

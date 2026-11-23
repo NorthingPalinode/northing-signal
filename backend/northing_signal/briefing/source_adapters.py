@@ -243,7 +243,10 @@ def modelscope_models(source, body, limit):
                 or name.split("/")[0].casefold() != source["organization"].casefold()):
             continue
         metadata = json.dumps({k:v for k,v in row.items() if k in {"id", "display_name", "description", "license", "tasks", "tags", "gated"}},ensure_ascii=False)
-        output.append(material(source,name,"https://modelscope.cn/models/"+name,metadata,kind="catalog_metadata"))
+        # Repository creation time: the model was public then or later, never earlier.
+        created = published_date(row.get("created_at")) if row.get("created_at") else None
+        output.append(material(source,name,"https://modelscope.cn/models/"+name,metadata,kind="catalog_metadata",
+                               date=created))
     return output
 
 
@@ -260,8 +263,13 @@ async def hub_models(source, body, limit, fetch):
         license_id = info.get("license")
         if not isinstance(license_id, str):
             license_id = next((t[8:] for t in row.get("tags", []) if isinstance(t, str) and t.startswith("license:")), None)
-        excerpt = f"模型仓库：{name}；声明许可：{license_id or '未说明'}。仓库更新时间不作为模型发布日期。"
-        value = material(source, name, "https://huggingface.co/" + name, excerpt, kind="catalog_metadata")
+        excerpt = (f"模型仓库：{name}；声明许可：{license_id or '未说明'}。"
+                   "日期为仓库创建时间；仓库更新时间不作为模型发布日期。")
+        # The list is sorted by last modification, so an old model whose card was just edited
+        # comes first. Its repository creation time keeps it from passing as a new release.
+        created = published_date(row.get("createdAt")) if row.get("createdAt") else None
+        value = material(source, name, "https://huggingface.co/" + name, excerpt, kind="catalog_metadata",
+                         date=created)
         # Read only the publicly served model card, never weights or gated files.
         # A model-weight license is not a grant to redistribute the whole card.
         if not output:
