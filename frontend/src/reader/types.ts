@@ -198,6 +198,8 @@ export type View = {
   follows?: Follow[];
   saved_events?: Story[];
   confirmed_follow_id?: string;
+  /** The signed-in account (absent on snapshots of past briefings). */
+  account?: import("../auth").Account;
 };
 export type Page =
   | "briefing"

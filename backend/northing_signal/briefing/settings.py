@@ -30,6 +30,19 @@ class ReaderSettings(BaseSettings):
     reader_web_api_key: SecretStr = SecretStr("")
     reader_openalex_api_key: SecretStr = SecretStr("")
     reader_x_bearer_token: SecretStr = SecretStr("")
+    # Accounts. token: every reader signs in with a token (each token is one account with its own
+    # data); off: a single local reader, as before accounts existed (personal installs only).
+    reader_auth: Literal["token", "off"] = "token"
+    # Let visitors create their own token on the sign-in page.
+    reader_signup: bool = True
+    reader_signups_per_hour: int = Field(default=10, ge=0, le=1000)  # per client address
+    # Limits for ordinary accounts (admins are not limited). Empty requests limit: unlimited.
+    reader_user_follow_limit: int = Field(default=3, ge=0, le=12)
+    reader_user_requests_per_day: int | None = Field(default=10, ge=0)
+    # Session cookie Secure flag: auto follows the request scheme (X-Forwarded-Proto included).
+    reader_cookie_secure: Literal["auto", "always", "never"] = "auto"
+    # Extra origins allowed to send changes, comma separated (the site's own origin always is).
+    reader_allowed_origins: str = ""
     # Public digest: when set, every completed update also writes the static site here
     # (relative paths are under the project). Empty: publish only with the CLI command.
     reader_publish_dir: str = ""

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { signedOut } from "./auth";
 import type { View } from "./reader/types";
 import { searchSources, sourceName, type SearchSource } from "./searchSources";
 
@@ -56,6 +57,7 @@ export default function FollowIntentForm({
       signal: controller.signal,
     });
     const result = await response.json();
+    if (response.status === 401) signedOut();
     if (!response.ok)
       throw new Error(
         typeof result.detail === "string"

@@ -129,6 +129,7 @@ export default function StoryReader({
   askFeedback,
   undo,
   regroup,
+  canRegroup = true,
   loadRaw,
 }: ActionProps & {
   view: View | null;
@@ -138,13 +139,15 @@ export default function StoryReader({
   go: (id: string) => void;
   undo: (action: Action) => void;
   regroup: (path: string, body: object, done: string) => void;
+  /** Splits and merges change every reader's view: admins only. */
+  canRegroup?: boolean;
   loadRaw: () => Promise<Raw>;
 }) {
   const [raw, setRaw] = useState<Raw | null>(null);
   const [rawBusy, setRawBusy] = useState(false);
   const [mergeInto, setMergeInto] = useState("");
   const kind = story.content_kind;
-  const candidates = historical ? [] : mergeCandidates(view, story);
+  const candidates = historical || !canRegroup ? [] : mergeCandidates(view, story);
   const history = story.actions.filter(
     (a) => !["shown", "opened"].includes(a.kind),
   );
@@ -276,7 +279,7 @@ export default function StoryReader({
                   <a href={t.url} target="_blank" rel="noreferrer">
                     {t.title}
                   </a>
-                  {!historical && (
+                  {!historical && canRegroup && (
                     <button
                       className="r-link small"
                       aria-label={"不是同一件事：" + t.title}

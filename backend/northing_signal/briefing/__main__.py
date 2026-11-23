@@ -24,18 +24,41 @@ async def analyze_pending(service, limit, reference=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["collect", "enrich", "analyze", "status", "export", "evaluate", "discover", "recheck", "publish"])
+    parser.add_argument("command", choices=["collect", "enrich", "analyze", "status", "export", "evaluate", "discover", "recheck", "publish", "token", "users"])
     parser.add_argument("--limit", type=int, default=24)
     parser.add_argument("--database", default=None)
     parser.add_argument("--reference", type=Path)
     parser.add_argument("--split", choices=["all", "development", "holdout"], default="all")
     parser.add_argument("--query", default="AI agents")
     parser.add_argument("--out", default=None, help="publish: output directory (default READER_PUBLISH_DIR)")
+    parser.add_argument("--admin", action="store_true", help="token: the account may do shared corrections")
+    parser.add_argument("--claim", default=None,
+                        help="token: issue a new token for this existing account id (the old one stops working)")
+    parser.add_argument("--claim-local", action="store_true",
+                        help="token: take over the data written before accounts existed")
+    parser.add_argument("--token", default=None,
+                        help="token: use this value instead of a generated one (short values are easy to guess)")
     args = parser.parse_args()
     if not 0 <= args.limit <= 120:
         parser.error("limit must be between 0 and 120")
     settings = ReaderSettings()
     store = Store(args.database or settings.root / ".local/briefing-v2.db")
+    if args.command == "token":
+        from .store import LOCAL_USER
+        claim = LOCAL_USER if args.claim_local else args.claim
+        try:
+            user, token = store.create_user("admin" if args.admin else "user", claim=claim, token=args.token)
+        except (LookupError, ValueError) as error:
+            parser.error(str(error))
+        result = {"user_id": user["id"], "role": user["role"], "token": token,
+                  "note": "令牌只显示这一次，请妥善保存；丢失后用 --claim 账号ID 重新签发。"}
+        if args.token and len(args.token.strip()) < 24:
+            result["warning"] = "这个令牌很短，容易被猜到；公网部署前请换成自动生成的令牌。"
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    if args.command == "users":
+        print(json.dumps(store.users(), ensure_ascii=False, indent=2))
+        return
     if args.command == "evaluate":
         from .evaluate import compare
         from .understand import POLICY_HASH

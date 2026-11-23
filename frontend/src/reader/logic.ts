@@ -227,7 +227,9 @@ export function queueLabel(run: Run) {
     ? `追踪「${run.follow_name}」`
     : run.kind === "discovery"
       ? `搜索「${run.query}」`
-      : "更新情报";
+      : run.kind === "other"
+        ? "其他读者的任务"
+        : "更新情报";
 }
 
 /** Events a reader may fold this one into: same topic, newest first. */

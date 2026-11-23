@@ -2,7 +2,8 @@ services:
   northing-signal:
     build: .
     ports:
-      # Local single-user app without authentication: keep the host side on loopback.
+      # Readers sign in with tokens (READER_AUTH=token, the default). Serve it through an HTTPS
+      # reverse proxy (Caddy, Nginx) on this host and keep the container port on loopback.
       - "127.0.0.1:8000:8000"
     env_file:
       - .env

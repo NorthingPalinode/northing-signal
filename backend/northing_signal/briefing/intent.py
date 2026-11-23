@@ -7,6 +7,7 @@ from pydantic import Field
 
 from .models import Contract, TrackingPlan
 from .search_sources import SEARCH_SOURCES, source_access
+from .store import LOCAL_USER
 from .tracking import folded
 from .understand import has_material
 
@@ -60,13 +61,13 @@ class IntentEngine:
     def __init__(self, analyzer, store):
         self.analyzer, self.store = analyzer, store
 
-    async def interpret(self, description, follow_id=None):
+    async def interpret(self, description, follow_id=None, user=LOCAL_USER):
         states = self.store.source_states()
         statuses = {key: states.get(key + "-discovery", {}).get("status", "not_checked") for key in SEARCH_SOURCES}
         access = {key: source_access(key, self.analyzer.settings) for key in SEARCH_SOURCES}
         plan = await self.analyzer.request_json(PLAN_PROMPT, {"description": description, "source_status": statuses, "source_access": access},
                                                TrackingPlan.model_validate, purpose="intent_plan", maximum=2600)
-        return self.store.create_follow_draft(description, plan, follow_id)
+        return self.store.create_follow_draft(description, plan, follow_id, user)
 
     async def evaluate(self, follow, materials):
         expected = {m.version for m in materials}

@@ -1,6 +1,8 @@
 """A separate SQLite file: immutable material revisions and append-only reader actions."""
 
+import hashlib
 import json
+import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -10,6 +12,8 @@ from uuid import uuid4
 
 from .models import POLICY_EPOCH, Interaction, Material, Preferences, digest, now
 
+LOCAL_USER = "local"  # owner of rows written before accounts existed, and of auth-off installs
+TOKEN_PREFIX = "nst_"
 CONTENT_TABLES = ("materials", "judgments")  # judgment_failures joins in migration 3
 READER_TABLES = ("interactions", "preferences", "follows", "intent_assessments")
 EVENT_TABLES = ("events", "event_members", "event_aliases")  # count as content: they regroup the briefing
@@ -97,6 +101,45 @@ MIGRATIONS = [
         started_at TEXT NOT NULL, finished_at TEXT, data TEXT NOT NULL);
     CREATE INDEX refreshes_started ON refreshes(started_at);
     """ + _revision_triggers("refreshes", "reader_revision")),
+    # Accounts (2026-11-23): each token is one user with its own preferences, actions, follows,
+    # visits and briefing history. Content (materials, judgments, events) stays shared.
+    # Existing personal rows belong to the "local" account; a token can claim it later.
+    # Rebuilt tables lose their triggers with them: re-create.
+    (6, f"""
+    CREATE TABLE users (
+        id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, role TEXT NOT NULL, data TEXT NOT NULL,
+        created_at TEXT NOT NULL, last_seen_at TEXT);
+    INSERT INTO users VALUES ('{LOCAL_USER}', NULL, 'admin', '{{"name": "原始账号"}}',
+                              strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL);
+    CREATE TABLE interactions_v6 (
+        user_id TEXT NOT NULL, id TEXT NOT NULL, fingerprint TEXT NOT NULL, data TEXT NOT NULL,
+        created_at TEXT NOT NULL, PRIMARY KEY(user_id, id));
+    INSERT INTO interactions_v6 SELECT '{LOCAL_USER}', id, fingerprint, data, created_at
+        FROM interactions ORDER BY rowid;
+    DROP TABLE interactions;
+    ALTER TABLE interactions_v6 RENAME TO interactions;
+    CREATE INDEX interactions_kind ON interactions(user_id, json_extract(data, '$.kind'));
+    CREATE TABLE follows_v6 (user_id TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL,
+        PRIMARY KEY(user_id, id));
+    INSERT INTO follows_v6 SELECT '{LOCAL_USER}', id, data FROM follows ORDER BY rowid;
+    DROP TABLE follows;
+    ALTER TABLE follows_v6 RENAME TO follows;
+    CREATE TABLE visits_v6 (user_id TEXT NOT NULL, id TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, id));
+    INSERT INTO visits_v6 SELECT '{LOCAL_USER}', id, created_at FROM visits ORDER BY rowid;
+    DROP TABLE visits;
+    ALTER TABLE visits_v6 RENAME TO visits;
+    ALTER TABLE preferences ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LOCAL_USER}';
+    CREATE INDEX preferences_user ON preferences(user_id, id);
+    ALTER TABLE snapshots ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LOCAL_USER}';
+    CREATE INDEX snapshots_user ON snapshots(user_id, created_at);
+    ALTER TABLE follow_drafts ADD COLUMN user_id TEXT NOT NULL DEFAULT '{LOCAL_USER}';
+    CREATE TABLE user_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, kind TEXT NOT NULL,
+        created_at TEXT NOT NULL);
+    CREATE INDEX user_usage_user ON user_usage(user_id, created_at);
+    """ + _revision_triggers("interactions", "reader_revision")
+        + "\n" + _revision_triggers("follows", "reader_revision")),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 SNAPSHOT_KEEP, SNAPSHOT_DAYS = 60, 90
@@ -317,42 +360,129 @@ class Store:
         with self.connection() as db:
             return {r["id"]: json.loads(r["data"]) for r in db.execute("SELECT * FROM source_states")}
 
-    def preferences(self):
+    # ---- accounts ------------------------------------------------------------------------------
+
+    @staticmethod
+    def token_hash(token):
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def create_user(self, role="user", *, claim=None, token=None):
+        """A new account and its token, or a fresh token for an existing account (claim=id).
+
+        token: chosen by the operator instead of generated (CLI only; may be easy to guess).
+        Only the token's hash is stored: the token itself is returned once and never again.
+        """
+        if token is not None:
+            token = token.strip()
+            if not token or len(token) > 200 or any(c.isspace() for c in token):
+                raise ValueError("令牌需为 1–200 个字符，且不能含空格")
+        token = token or TOKEN_PREFIX + secrets.token_urlsafe(32)
+        hashed = self.token_hash(token)
         with self.connection() as db:
-            row = db.execute("SELECT data FROM preferences ORDER BY id DESC LIMIT 1").fetchone()
+            db.execute("BEGIN IMMEDIATE")
+            owner = db.execute("SELECT id FROM users WHERE token_hash=?", (hashed,)).fetchone()
+            if owner and owner["id"] != claim:
+                raise ValueError(f"这个令牌已属于账号 {owner['id']}")
+            if claim:
+                if not db.execute("SELECT 1 FROM users WHERE id=?", (claim,)).fetchone():
+                    raise LookupError("账号不存在")
+                db.execute("UPDATE users SET token_hash=?, role=? WHERE id=?", (hashed, role, claim))
+                key = claim
+            else:
+                key = secrets.token_hex(8)
+                db.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, NULL)",
+                           (key, hashed, role, self.encoded({}), now()))
+        return self.user(key), token
+
+    def user(self, key):
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM users WHERE id=?", (key,)).fetchone()
+        return self._user(row) if row else None
+
+    def user_by_token(self, token):
+        if not isinstance(token, str) or not token or len(token) > 200:
+            return None
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM users WHERE token_hash=?", (self.token_hash(token),)).fetchone()
+        return self._user(row) if row else None
+
+    @staticmethod
+    def _user(row):
+        return {"id": row["id"], "role": row["role"], "created_at": row["created_at"],
+                "last_seen_at": row["last_seen_at"], "has_token": row["token_hash"] is not None}
+
+    def users(self):
+        with self.connection() as db:
+            return [self._user(r) for r in db.execute("SELECT * FROM users ORDER BY created_at")]
+
+    def touch_user(self, key):
+        with self.connection() as db:
+            db.execute("UPDATE users SET last_seen_at=? WHERE id=?", (now(), key))
+
+    def active_users(self, since):
+        """Accounts seen since `since`, plus the local account when it has a reading history."""
+        with self.connection() as db:
+            rows = db.execute("SELECT id FROM users WHERE last_seen_at >= ? OR id=? ORDER BY last_seen_at DESC",
+                              (since, LOCAL_USER)).fetchall()
+        return [r["id"] for r in rows]
+
+    def reserve_usage(self, user, kind, limit, since):
+        """Count one quota use; raises when `limit` uses since `since` are already spent."""
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if limit is not None:
+                used = db.execute("SELECT COUNT(*) FROM user_usage WHERE user_id=? AND created_at >= ?",
+                                  (user, since)).fetchone()[0]
+                if used >= limit:
+                    raise ValueError("user_quota_reached")
+            db.execute("INSERT INTO user_usage(user_id, kind, created_at) VALUES (?, ?, ?)", (user, kind, now()))
+
+    def usage_count(self, user, since):
+        with self.connection() as db:
+            return db.execute("SELECT COUNT(*) FROM user_usage WHERE user_id=? AND created_at >= ?",
+                              (user, since)).fetchone()[0]
+
+    # ---- per-reader data (every method is scoped to one account) ------------------------------
+
+    def preferences(self, user=LOCAL_USER):
+        with self.connection() as db:
+            row = db.execute("SELECT data FROM preferences WHERE user_id=? ORDER BY id DESC LIMIT 1",
+                             (user,)).fetchone()
         return Preferences.model_validate_json(row["data"]) if row else Preferences()
 
-    def save_preferences(self, value: Preferences):
+    def save_preferences(self, value: Preferences, user=LOCAL_USER):
         with self.connection() as db:
-            db.execute("INSERT INTO preferences(data, created_at) VALUES (?, ?)",
-                       (value.model_dump_json(), now()))
+            db.execute("INSERT INTO preferences(data, created_at, user_id) VALUES (?, ?, ?)",
+                       (value.model_dump_json(), now(), user))
 
-    def interact(self, value: Interaction):
+    def interact(self, value: Interaction, user=LOCAL_USER):
         payload = value.model_dump()
         fingerprint = digest(payload)
         with self.connection() as db:
-            old = db.execute("SELECT fingerprint FROM interactions WHERE id=?", (value.request_id,)).fetchone()
+            old = db.execute("SELECT fingerprint FROM interactions WHERE user_id=? AND id=?",
+                             (user, value.request_id)).fetchone()
             if old:
                 if old["fingerprint"] != fingerprint:
                     raise ValueError("同一操作编号不能改变内容")
                 return False
             if value.kind == "retract":
-                target = db.execute("SELECT data FROM interactions WHERE id=?", (value.retracts,)).fetchone()
+                target = db.execute("SELECT data FROM interactions WHERE user_id=? AND id=?",
+                                    (user, value.retracts)).fetchone()
                 old = json.loads(target["data"]) if target else None
                 # Matched by version, not event id: a split or merge may have renamed the event since.
                 if (not old or old["version"] != value.version
                         or old["kind"] in {"retract", "shown", "opened"}):
                     raise ValueError("找不到可撤回的操作")
-            db.execute("INSERT INTO interactions VALUES (?, ?, ?, ?)",
-                       (value.request_id, fingerprint, self.encoded(payload), now()))
+            db.execute("INSERT INTO interactions (user_id, id, fingerprint, data, created_at) VALUES (?, ?, ?, ?, ?)",
+                       (user, value.request_id, fingerprint, self.encoded(payload), now()))
         return True
 
-    def interactions(self, kinds=None):
-        query, args = "SELECT * FROM interactions", ()
+    def interactions(self, kinds=None, user=LOCAL_USER):
+        query, args = "SELECT * FROM interactions WHERE user_id=?", (user,)
         if kinds:
             # Same expression as the interactions_kind index.
-            query += f" WHERE json_extract(data, '$.kind') IN ({','.join('?' * len(kinds))})"
-            args = tuple(kinds)
+            query += f" AND json_extract(data, '$.kind') IN ({','.join('?' * len(kinds))})"
+            args += tuple(kinds)
         with self.connection() as db:
             return [{**json.loads(r["data"]), "at": r["created_at"]}
                     for r in db.execute(query + " ORDER BY rowid", args)]
@@ -380,26 +510,27 @@ class Store:
         with self.connection() as db:
             db.execute("UPDATE receipts SET data=? WHERE id=?", (self.encoded(value), receipt_id))
 
-    def visit(self, request_id):
+    def visit(self, request_id, user=LOCAL_USER):
         with self.connection() as db:
-            db.execute("INSERT OR IGNORE INTO visits VALUES (?, ?)", (request_id, now()))
+            db.execute("INSERT OR IGNORE INTO visits VALUES (?, ?, ?)", (user, request_id, now()))
 
-    def last_visit(self):
+    def last_visit(self, user=LOCAL_USER):
         with self.connection() as db:
-            row = db.execute("SELECT created_at FROM visits ORDER BY rowid DESC LIMIT 1").fetchone()
+            row = db.execute("SELECT created_at FROM visits WHERE user_id=? ORDER BY rowid DESC LIMIT 1",
+                             (user,)).fetchone()
             return row["created_at"] if row else None
 
-    def snapshots(self, key=None):
+    def snapshots(self, key=None, user=LOCAL_USER):
         with self.connection() as db:
             if key:
-                row = db.execute("SELECT data FROM snapshots WHERE id=?", (key,)).fetchone()
+                row = db.execute("SELECT data FROM snapshots WHERE id=? AND user_id=?", (key, user)).fetchone()
                 return json.loads(row["data"]) if row else None
             # Older snapshots have no label fields: those come back as None.
             rows = db.execute("""SELECT id, created_at, json_extract(data, '$.snapshot_kind') AS kind,
                 json_extract(data, '$.snapshot_trigger') AS trigger,
                 json_extract(data, '$.headlines') AS headlines,
                 json_array_length(data, '$.focus') + json_array_length(data, '$.radar') AS count
-                FROM snapshots ORDER BY rowid DESC LIMIT 20""").fetchall()
+                FROM snapshots WHERE user_id=? ORDER BY rowid DESC LIMIT 20""", (user,)).fetchall()
             return [{"id": r["id"], "created_at": r["created_at"], "kind": r["kind"], "trigger": r["trigger"],
                      "headlines": json.loads(r["headlines"]) if r["headlines"] else [], "count": r["count"]}
                     for r in rows]
@@ -428,66 +559,78 @@ class Store:
             rows = db.execute("SELECT data FROM receipts WHERE created_at >= ?", (since or now()[:10],)).fetchall()
         return [json.loads(r["data"]) for r in rows]
 
-    def snapshot(self, value):
-        key = digest([now(), value])[:24]
+    def snapshot(self, value, user=LOCAL_USER):
+        key = digest([now(), user, value])[:24]
         cutoff = (datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_DAYS)).isoformat()
         with self.connection() as db:
-            db.execute("INSERT INTO snapshots VALUES (?, ?, ?)", (key, self.encoded(value), now()))
-            # Keep the newest SNAPSHOT_KEEP, and anything younger than SNAPSHOT_DAYS.
-            db.execute("""DELETE FROM snapshots WHERE created_at < ? AND rowid NOT IN (
-                SELECT rowid FROM snapshots ORDER BY rowid DESC LIMIT ?)""", (cutoff, SNAPSHOT_KEEP))
+            db.execute("INSERT INTO snapshots (id, data, created_at, user_id) VALUES (?, ?, ?, ?)",
+                       (key, self.encoded(value), now(), user))
+            # Keep each reader's newest SNAPSHOT_KEEP, and anything younger than SNAPSHOT_DAYS.
+            db.execute("""DELETE FROM snapshots WHERE user_id=? AND created_at < ? AND rowid NOT IN (
+                SELECT rowid FROM snapshots WHERE user_id=? ORDER BY rowid DESC LIMIT ?)""",
+                       (user, cutoff, user, SNAPSHOT_KEEP))
         return key
 
-    def follows(self):
+    def follows(self, user=LOCAL_USER):
         with self.connection() as db:
-            rows = [json.loads(row["data"]) for row in db.execute("SELECT data FROM follows ORDER BY rowid")]
+            rows = [json.loads(row["data"]) for row in db.execute(
+                "SELECT data FROM follows WHERE user_id=? ORDER BY rowid", (user,))]
         return [row for row in rows if not row.get("archived")]
 
-    def save_follow(self, value):
+    def all_follows(self):
+        """Every account's current follows, each with its owner (for the tracking loop)."""
+        with self.connection() as db:
+            rows = [(r["user_id"], json.loads(r["data"])) for r in db.execute(
+                "SELECT user_id, data FROM follows ORDER BY rowid")]
+        return [{**row, "user_id": owner} for owner, row in rows if not row.get("archived")]
+
+    def save_follow(self, value, user=LOCAL_USER, limit=12):
         name, query = value.name.strip(), (value.query or value.name).strip()
         if len(name) < 2 or len(query) < 2:
             raise ValueError("请输入至少两个字的话题或检索词")
         key = digest(query.casefold())[:24]
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT data FROM follows WHERE id=?", (key,)).fetchone()
+            row = db.execute("SELECT data FROM follows WHERE user_id=? AND id=?", (user, key)).fetchone()
             previous = json.loads(row["data"]) if row else None
             count = sum(not json.loads(row["data"]).get("archived")
-                        for row in db.execute("SELECT data FROM follows"))
-            if count >= 12 and (not previous or previous.get("archived")):
-                raise ValueError("最多关注 12 个话题，请先取消不再需要的话题")
+                        for row in db.execute("SELECT data FROM follows WHERE user_id=?", (user,)))
+            if count >= limit and (not previous or previous.get("archived")):
+                raise ValueError(f"最多关注 {limit} 个话题，请先取消不再需要的话题")
             data = {"id": key, "created_at": now(), "last_checked": None, "last_status": "not_checked",
                     "material_ids": [], "seen_versions": [], **(previous or {}),
                     "name": name, "query": query, "active": value.active, "archived": False}
-            db.execute("INSERT OR REPLACE INTO follows VALUES (?, ?)", (key, self.encoded(data)))
+            db.execute("INSERT OR REPLACE INTO follows VALUES (?, ?, ?)", (user, key, self.encoded(data)))
         return data
 
-    def update_follow(self, key, **changes):
+    def update_follow(self, key, *, user=LOCAL_USER, **changes):
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT data FROM follows WHERE id=?", (key,)).fetchone()
+            row = db.execute("SELECT data FROM follows WHERE user_id=? AND id=?", (user, key)).fetchone()
             if not row or json.loads(row["data"]).get("archived"):
                 raise ValueError("这个关注话题不存在")
             data = {**json.loads(row["data"]), **changes}
-            db.execute("UPDATE follows SET data=? WHERE id=?", (self.encoded(data), key))
+            db.execute("UPDATE follows SET data=? WHERE user_id=? AND id=?", (self.encoded(data), user, key))
         return data
 
-    def create_follow_draft(self, description, plan, follow_id=None):
-        previous = next((f for f in self.follows() if f["id"] == follow_id), None)
+    def create_follow_draft(self, description, plan, follow_id=None, user=LOCAL_USER):
+        previous = next((f for f in self.follows(user) if f["id"] == follow_id), None)
         if follow_id and not previous:
             raise ValueError("这个关注话题不存在")
         value = {"id": uuid4().hex, "description": description, "plan": plan.model_dump(),
                  "follow_id": follow_id, "base_plan_hash": previous.get("plan_hash") if previous else None,
                  "created_at": now(), "confirmed_at": None}
         with self.connection() as db:
-            db.execute("INSERT INTO follow_drafts VALUES (?, ?)", (value["id"], self.encoded(value)))
+            db.execute("INSERT INTO follow_drafts (id, data, user_id) VALUES (?, ?, ?)",
+                       (value["id"], self.encoded(value), user))
         return value
 
-    def confirm_follow(self, confirmation):
+    def confirm_follow(self, confirmation, user=LOCAL_USER, limit=12):
         plan = confirmation.plan.model_dump()
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT data FROM follow_drafts WHERE id=?", (confirmation.draft_id,)).fetchone()
+            row = db.execute("SELECT data FROM follow_drafts WHERE id=? AND user_id=?",
+                             (confirmation.draft_id, user)).fetchone()
             if not row:
                 raise ValueError("追踪方案草稿不存在，请重新理解需求")
             draft = json.loads(row["data"])
@@ -495,19 +638,19 @@ class Store:
             if draft["confirmed_at"]:
                 if draft["plan_hash"] != plan_hash or draft["active"] != confirmation.active:
                     raise ValueError("这份草稿已确认，修改需求请重新生成方案")
-                row = db.execute("SELECT data FROM follows WHERE id=?", (draft["follow_id"],)).fetchone()
+                row = db.execute("SELECT data FROM follows WHERE user_id=? AND id=?", (user, draft["follow_id"])).fetchone()
                 value = json.loads(row["data"]) if row else None
                 if not value or value.get("archived") or value.get("plan_hash") != plan_hash:
                     raise ValueError("此确认已过期，请读取当前追踪方案")
                 return value, False
-            rows = [json.loads(r["data"]) for r in db.execute("SELECT data FROM follows")]
+            rows = [json.loads(r["data"]) for r in db.execute("SELECT data FROM follows WHERE user_id=?", (user,))]
             previous = next((r for r in rows if r["id"] == draft["follow_id"] and not r.get("archived")), None)
             if draft["follow_id"] and not previous:
                 raise ValueError("原关注话题已取消，不能替换方案")
             if previous and draft.get("base_plan_hash") != previous.get("plan_hash"):
                 raise ValueError("追踪方案已发生变化，请重新理解并确认")
-            if not previous and sum(not r.get("archived") for r in rows) >= 12:
-                raise ValueError("最多关注 12 个话题，请先取消不再需要的话题")
+            if not previous and sum(not r.get("archived") for r in rows) >= limit:
+                raise ValueError(f"最多关注 {limit} 个话题，请先取消不再需要的话题")
             key = previous["id"] if previous else uuid4().hex[:24]
             value = {"id": key, "created_at": now(), "material_ids": [], **(previous or {}),
                      "name": plan["title"], "query": plan["searches"][0]["query"] if plan["searches"] else plan["title"],
@@ -517,7 +660,7 @@ class Store:
                      "seen_versions": [], "search_cursor": 0}
             draft.update(confirmed_at=value["confirmed_at"], follow_id=key, plan=plan,
                          plan_hash=plan_hash, active=confirmation.active)
-            db.execute("INSERT OR REPLACE INTO follows VALUES (?, ?)", (key, self.encoded(value)))
+            db.execute("INSERT OR REPLACE INTO follows VALUES (?, ?, ?)", (user, key, self.encoded(value)))
             db.execute("UPDATE follow_drafts SET data=? WHERE id=?", (self.encoded(draft), draft["id"]))
         return value, True
 

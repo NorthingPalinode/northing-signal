@@ -140,6 +140,63 @@ bash scripts/start.sh
 
 打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)，点击右上角「更新」。每次更新按有限批量执行并可取消；未完成的材料保留待处理状态。刷新、主动检索和话题追踪共用一个后台任务：忙碌时新任务进入队列，手动操作排在定时追踪之前，排队中的任务可以单独取消。除每天两次的自动更新外，没有站外通知，也不会自动替用户操作第三方系统。
 
+默认需要用令牌登录（见下一节）。只在本机自己用时，可在 `.env` 中设置 `READER_AUTH=off`，不需要登录，和以前一样。
+
+## 账号与云端部署
+
+每个令牌就是一个账号，不需要邮箱或手机号。所有读者共享同一份内容库（采集的材料、AI 整理结果和事件聚合）；**偏好、收藏、反馈、已了解、追踪话题、访问记录和过去的简报按账号分开**，互相看不到。
+
+- **登录**：在登录页粘贴令牌。登录状态保存在仅服务端可读的 Cookie 中；脚本也可以用 `Authorization: Bearer <令牌>` 请求接口。
+- **一键创建令牌**：登录页点击即可得到一个新账号。令牌只显示一次，数据库只保存它的哈希，丢失后无法找回。可用 `READER_SIGNUP=false` 关闭；每个来源地址每小时最多创建 `READER_SIGNUPS_PER_HOUR` 个。
+- **管理员**：用命令行签发。第一次部署时，用下面的命令接管升级前的数据（原来的收藏、追踪话题等都在「原始账号」里）：
+
+  ```bash
+  python -m northing_signal.briefing token --admin --claim-local   # 接管原有数据并成为管理员
+  python -m northing_signal.briefing token --admin                 # 另建一个管理员
+  python -m northing_signal.briefing token --claim <账号ID>         # 为丢失令牌的账号重新签发（旧令牌立即失效）
+  python -m northing_signal.briefing users                         # 列出账号
+  ```
+
+- **权限与限额**：
+
+  | 操作 | 普通账号 | 管理员 |
+  |---|---|---|
+  | 阅读、收藏、反馈、偏好、周报 | ✓ | ✓ |
+  | 「更新」全站内容（同一时间只运行一次，重复点击会合并） | ✓ | ✓ |
+  | 外部检索、AI 理解追踪需求、手动检查追踪话题 | 合计每天 `READER_USER_REQUESTS_PER_DAY` 次（默认 10） | 不限 |
+  | 追踪话题数 | `READER_USER_FOLLOW_LIMIT` 个（默认 3） | 12 个 |
+  | 拆分、合并事件，重新整理失败材料（对所有人生效） | — | ✓ |
+  | 取消任务 | 只能取消自己发起的 | 任何任务 |
+
+  别人发起的检索或追踪任务在你的页面上只显示为「其他读者的任务」，不会显示检索内容。全站更新完成后，会为最近 30 天内登录过的账号各保存一份自己的「过去的简报」。
+
+- **部署**：`docker compose up -d --build` 后，在同一台机器上用 Caddy 或 Nginx 提供 HTTPS 并反向代理到 `127.0.0.1:8000`。容器信任代理传来的 `X-Forwarded-For` / `X-Forwarded-Proto`，所以不要把 8000 端口直接暴露到公网。HTTPS 下登录 Cookie 自动带 Secure 标记。Caddy 最简配置：
+
+  ```
+  reader.example.com {
+      reverse_proxy 127.0.0.1:8000
+  }
+  ```
+
+  在容器里签发管理员令牌：`docker compose exec northing-signal python -m northing_signal.briefing token --admin --claim-local`。
+
+- **Cloudflare Tunnel 部署（免费，无需公网 IP）**：适合直接在本机或内网机器上保留现有 SQLite 数据并对外提供 HTTPS 访问（完整交互式阅读器，需要 `READER_AUTH=token`）：
+
+  1. 安装 `cloudflared`（Windows：`winget install --id Cloudflare.cloudflared`）。
+  2. 临时体验（无需域名，每次重启生成新地址）：
+
+     ```powershell
+     powershell -ExecutionPolicy Bypass -File scripts/cloudflare.ps1
+     ```
+
+  3. 固定域名（已有托管在 Cloudflare 的域名时）：在 Cloudflare Zero Trust → Networks → Tunnels 创建隧道，将 Public Hostname 指向 `http://127.0.0.1:8000`（Docker 部署时指向 `http://northing-signal:8000`），复制 Tunnel Token 后运行：
+
+     ```powershell
+     powershell -ExecutionPolicy Bypass -File scripts/cloudflare.ps1 -TunnelToken "<你的TunnelToken>"
+     ```
+
+     或在 `.env` 设置 `CLOUDFLARE_TUNNEL_TOKEN` 后用 Docker 启动：`docker compose -f compose.yaml -f compose.cloudflare.yaml up -d --build`。
+
 ## 模型与可选接口配置
 
 在本项目 `.env` 中填写自己的兼容 Chat Completions 接口；已有 `.env` 不要用模板覆盖。
@@ -200,7 +257,7 @@ npm run build
 
 ## 数据与当前限制
 
-- 当前是本机单用户开发版，不提供生产鉴权、公网部署或多用户隔离。
+- 账号使用令牌登录，按账号隔离个人数据；尚未提供令牌自助重置、账号删除、团队共享或审计日志。创建令牌的频率限制保存在内存中，重启后清零，多进程部署时不共享；令牌为 256 位随机数，登录失败只做短暂延迟，没有锁定。每天 0 点和 12 点的自动更新是全站共享的，开关以「原始账号」的阅读偏好为准。所有账号共用同一个后台任务队列和同一份模型额度。
 - 数据默认保存在 `.local/briefing-v2.db`，结构升级前会自动备份为同目录下的 `.bak-v<旧版本号>` 文件；旧个人库（`.local/cfaw-news.db`）不自动迁移，可用 `python scripts/export_legacy.py` 只读导出为 JSON Lines。`data/archive/articles.json` 等迁移出处保留。
 - 在 Docker Compose 中升级时，沿用原来的项目名可复用数据卷。旧项目名为 `cfaw-news` 时，运行 `docker compose -p cfaw-news up --build --remove-orphans` 即可替换旧容器并保留数据。
 - 事件聚合使用具体事件框架和原文指纹，归属保存在本地：报道一旦归入某个事件，就不随重新整理而改变，事件 ID 保持稳定。不同措辞的同一次发布（如 “GPT-5” 与 “GPT-5 release”）会自动归并，规则刻意保守：主体、版本号和产品词标准化后必须完全一致，且相隔不超过 7 天。归错的报道可在阅读页的报道时间线中拆分，重复的事件可以手动合并。跨语言去重、长尾召回与摘要语义仍可能出错，尚未实现向量检索。
