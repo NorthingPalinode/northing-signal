@@ -34,12 +34,51 @@ export function neighbours(ids: string[], id: string) {
   };
 }
 
+/** Timezone dates are shown in (IANA name); unset: the browser's own. Set from the view. */
+let displayZone: string | undefined;
+export function setDisplayZone(zone?: string | null) {
+  displayZone = zone || undefined;
+}
+
+/** Calendar date and clock time of a moment in the display timezone. */
+function zoned(date: Date | number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: displayZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour") % 24, minute: get("minute") };
+}
+
+/** "11月24日星期二" for the masthead, in the display timezone. */
+export function todayLabel(now = new Date()) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: displayZone,
+    month: "long",
+    day: "numeric",
+    weekday: "long",
+  }).format(now);
+}
+
+/** Name of the site timezone (update schedule, daily quotas), e.g. "纽约时间". */
+export function siteZoneLabel(view: View | null) {
+  const zone = view?.timezone;
+  if (!zone) return "";
+  return zone.options.find((o) => o.id === zone.site)?.label || zone.site || "服务器时区";
+}
+
 export function when(value?: string | null, capturedAt?: string) {
   const published = Date.parse(value ?? "");
   const hasPublished = Number.isFinite(published);
   const date = hasPublished ? published : Date.parse(capturedAt ?? "");
   if (!Number.isFinite(date)) return "时间未确认";
   const label = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: displayZone,
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -190,9 +229,10 @@ export function topThree(view: View | null) {
 export function clockLabel(value?: string | null, now = new Date()) {
   const date = new Date(value ?? "");
   if (Number.isNaN(date.getTime())) return "";
-  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diff = Math.round((day(date) - day(now)) / 86400000);
-  const time = `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+  const at = zoned(date);
+  const day = (d: ReturnType<typeof zoned>) => Date.UTC(d.year, d.month - 1, d.day);
+  const diff = Math.round((day(at) - day(zoned(now))) / 86400000);
+  const time = `${at.hour}:${String(at.minute).padStart(2, "0")}`;
   const prefix =
     diff === 0
       ? "今天"
@@ -200,7 +240,7 @@ export function clockLabel(value?: string | null, now = new Date()) {
         ? "昨天"
         : diff === 1
           ? "明天"
-          : `${date.getMonth() + 1}月${date.getDate()}日`;
+          : `${at.month}月${at.day}日`;
   return `${prefix} ${time}`;
 }
 

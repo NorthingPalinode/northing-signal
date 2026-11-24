@@ -11,8 +11,11 @@ import {
   pageFromHash,
   queueLabel,
   sections,
+  setDisplayZone,
+  siteZoneLabel,
   statusLabel,
   storyFromHash,
+  todayLabel,
   topThree,
   updateLine,
   when,
@@ -180,4 +183,21 @@ test("merge candidates are other events of the same topic, newest first", () => 
   assert.deepEqual(mergeCandidates(value, events[1]).map((e) => e.id), ["new", "old"]);
   assert.deepEqual(mergeCandidates(value, events[1], 1).map((e) => e.id), ["new"]);
   assert.deepEqual(mergeCandidates(null, events[1]), []);
+});
+
+test("dates follow the reader's timezone: New York by default, Beijing when chosen", () => {
+  const event = "2026-11-11T15:00:00Z"; // New York 10:00 on the 11th, Beijing 23:00 on the 11th
+  const now = new Date("2026-11-11T17:00:00Z"); // New York noon; Beijing already 1:00 on the 12th
+  setDisplayZone("America/New_York");
+  assert.equal(clockLabel(event, now), "今天 10:00");
+  assert.equal(todayLabel(now), "11月11日星期三");
+  setDisplayZone("Asia/Shanghai");
+  assert.equal(clockLabel(event, now), "昨天 23:00");
+  assert.equal(todayLabel(now), "11月12日星期四");
+  assert.match(when(event), /23:00/);
+  setDisplayZone(null);
+  const zone = { zone: "Asia/Shanghai", site: "America/New_York",
+    options: [{ id: "America/New_York", label: "纽约时间" }, { id: "Asia/Shanghai", label: "北京时间" }] };
+  assert.equal(siteZoneLabel(view([], { timezone: zone })), "纽约时间");
+  assert.equal(siteZoneLabel(null), "");
 });
