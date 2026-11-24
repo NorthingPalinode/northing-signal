@@ -1,6 +1,8 @@
 param(
     [int]$Port = 8000,
     [string]$TunnelToken = $env:CLOUDFLARE_TUNNEL_TOKEN,
+    [ValidateSet('http2', 'quic', 'auto')]
+    [string]$Protocol = 'http2',
     [switch]$Rebuild,
     [switch]$AllowNoAuth
 )
@@ -34,6 +36,7 @@ function Test-LocalHealth([int]$TargetPort) {
 
 Push-Location $root
 $serverProcess = $null
+$tunnelProcess = $null
 try {
     $cloudflared = Resolve-Cloudflared
 
@@ -71,11 +74,19 @@ try {
             '--host', '127.0.0.1', '--port', "$Port",
             '--proxy-headers', '--forwarded-allow-ips', '127.0.0.1,::1'
         )
-        $serverProcess = Start-Process -FilePath $venvPython -ArgumentList $uvicornArgs -WorkingDirectory $root -PassThru -NoNewWindow
+        # The server's output goes to log files, so a crash leaves its reason behind.
+        $logDir = Join-Path $root '.local\logs'
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $serverLog = Join-Path $logDir "cloudflare-server-$stamp.stderr.log"
+        $serverProcess = Start-Process -FilePath $venvPython -ArgumentList $uvicornArgs -WorkingDirectory $root -PassThru -NoNewWindow `
+            -RedirectStandardOutput (Join-Path $logDir "cloudflare-server-$stamp.stdout.log") -RedirectStandardError $serverLog
+        $null = $serverProcess.Handle  # keeps ExitCode readable after the process ends
+        Write-Host "Server log: $serverLog"
         $ready = $false
         for ($i = 0; $i -lt 40; $i++) {
             if ($serverProcess.HasExited) {
-                throw "Northing Signal exited early with code $($serverProcess.ExitCode)."
+                throw "Northing Signal exited early with code $($serverProcess.ExitCode). See $serverLog"
             }
             if (Test-LocalHealth -TargetPort $Port) {
                 $ready = $true
@@ -92,16 +103,37 @@ try {
     }
 
     if ($TunnelToken) {
-        Write-Host 'Starting Cloudflare Named Tunnel (fixed domain)... Press Ctrl+C to stop.'
-        & $cloudflared tunnel --no-autoupdate run --token $TunnelToken
+        Write-Host "Starting Cloudflare Named Tunnel (fixed domain, protocol=$Protocol)... Press Ctrl+C to stop."
+        $tunnelArgs = @('tunnel', '--no-autoupdate', '--protocol', $Protocol, 'run', '--token', $TunnelToken)
     } else {
-        Write-Host "Starting Cloudflare Quick Tunnel -> http://127.0.0.1:$Port ... Press Ctrl+C to stop."
+        Write-Host "Starting Cloudflare Quick Tunnel -> http://127.0.0.1:$Port (protocol=$Protocol) ... Press Ctrl+C to stop."
         Write-Host 'A public https://*.trycloudflare.com URL will appear below.'
-        & $cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$Port"
+        $tunnelArgs = @('tunnel', '--no-autoupdate', '--protocol', $Protocol, '--url', "http://127.0.0.1:$Port")
     }
+    $tunnelProcess = Start-Process -FilePath $cloudflared -ArgumentList $tunnelArgs -NoNewWindow -PassThru
+    $null = $tunnelProcess.Handle
+
+    # A tunnel in front of a stopped server only shows visitors errors: when the server goes,
+    # the tunnel goes too, and the reason is in the server log.
+    $failedChecks = 0
+    while (-not $tunnelProcess.HasExited) {
+        Start-Sleep -Seconds 5
+        if ($serverProcess) {
+            if ($serverProcess.HasExited) {
+                throw "Northing Signal exited with code $($serverProcess.ExitCode); tunnel stopped. See $serverLog"
+            }
+        } elseif (Test-LocalHealth -TargetPort $Port) {
+            $failedChecks = 0
+        } elseif (++$failedChecks -ge 3) {
+            throw "The reused Northing Signal on port $Port stopped answering; tunnel stopped."
+        }
+    }
+    Write-Host "cloudflared exited with code $($tunnelProcess.ExitCode)."
 } finally {
-    if ($serverProcess -and -not $serverProcess.HasExited) {
-        Stop-Process -Id $serverProcess.Id -Force -ErrorAction SilentlyContinue
+    foreach ($process in @($tunnelProcess, $serverProcess)) {
+        if ($process -and -not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
     }
     Pop-Location
 }
