@@ -26,6 +26,14 @@
 
 综合频道（Microsoft 新闻中心、Azure、Apple 新闻室、About Amazon）设置 `require` 关键词规则：标题与摘要不含 AI 相关词的条目在采集时丢弃，不占用模型整理额度。关键词规则可能漏掉措辞特殊的 AI 新闻。
 
+## 2026-11-24 GitHub 开源榜单
+
+「开源与社区」新增 4 个榜单入口（固定来源共 65 个），实测均取得 AI 项目：Trending 今日榜 12 个、本周榜 11 个（每页约 16 个仓库，过滤后保留 AI 相关项目），近 30 天新建 15 个、star 总量 15 个。
+
+- [GitHub Trending](https://github.com/trending) 没有官方接口，解析公开网页（`github_trending`）；GitHub 改版会使解析失效，届时在来源状态中显示为空或失败。
+- 近 30 天新建与 star 总量用[官方搜索接口](https://docs.github.com/en/rest/search/search#search-repositories)（`github_search`）。接口不接受主题之间的 OR，按每个主题分别查询再按 star 合并去重。匿名额度较低，可配置 `READER_GITHUB_TOKEN`。实测中曾有一次 `api.github.com` 被本机网络解析到非公网地址而被公网读取边界拒绝，重试即恢复。
+- 榜单存放在该来源的状态中（`source_states`），不新增数据表、不生成材料、不调用模型；失败时保留上一次的榜单与时间。
+
 ## 按重要性排列的未完成项
 
 | 优先级 | 来源 / 尚缺能力 | 实际限制或观察 | 当前替代与后续条件 |

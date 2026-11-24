@@ -193,3 +193,5 @@ collect/enrich/discover 联网，analyze 可能付费；recheck 只用已缓存�
 计划见 [LENSES_PLAN](plans/LENSES_PLAN.md)。`lenses.py` 在投影之后给每个事件加标签，纯函数，不调用模型、不改事件归属：`companies`（行动主体公司，含 `official` 与 `products`）、`mentions`（只是提到的公司）、`lenses`（所属板块）。行动主体按三条规则判断：事件 `subject` 命名了公司或其产品；标题以公司名开头（模型有时把投资方等当作主体）；有一篇报道来自该公司的官方来源。多事汇总（`roundup`）不算任何公司的动作。在 474 个合格事件的真实数据副本上，183 个归到了行动主体公司（OpenAI 51、Google 38、NVIDIA 21、Anthropic 20），55 个不属于任何板块（多为别名表之外的公司），仍在简报中。官方来源上的客户案例会算作该公司的动作，以小节点显示。
 
 阅读页的证据阶段与分项清单在前端纯逻辑中计算（`reader/logic.ts` `evidenceStages` / `evidenceChecklist`），沿用「依据」一行的措辞边界：他方测试不称独立验证，「未见」只指已收取的报道。
+
+开源榜单（`github.py`）不是材料：每次更新取得 GitHub Trending 日榜、周榜与官方搜索接口的近 30 天新建、star 总量四个榜单，只保留 AI 项目，存入对应来源的状态；不调用模型、不进入简报，失败时保留上一次的榜单与时间。话题追踪触发的来源补查跳过这四个入口。

@@ -32,6 +32,9 @@ class ReaderSettings(BaseSettings):
     reader_web_api_key: SecretStr = SecretStr("")
     reader_openalex_api_key: SecretStr = SecretStr("")
     reader_x_bearer_token: SecretStr = SecretStr("")
+    # Optional personal GitHub token: raises the search API's anonymous limit for the
+    # open source rankings (star totals, new projects). Trending needs none.
+    reader_github_token: SecretStr = SecretStr("")
     # Accounts. token: every reader signs in with a token (each token is one account with its own
     # data); off: a single local reader, as before accounts existed (personal installs only).
     reader_auth: Literal["token", "off"] = "token"

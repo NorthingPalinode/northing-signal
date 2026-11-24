@@ -27,6 +27,9 @@ import {
   lensLabel,
   lensStories,
   lineCounts,
+  rankingLabel,
+  repoFlagLabel,
+  repoMeta,
   trendFromHash,
   trendHash,
   type Lens,
@@ -1626,6 +1629,78 @@ export default function ReaderApp() {
     );
   }
 
+  /** GitHub's own rankings: picked list in the hash (`#trends/community/github-new`). */
+  function rankingPanel() {
+    const rankings = view?.rankings || [];
+    if (!rankings.length) return null;
+    const current = rankings.find((r) => r.id === trend.company) || rankings[0];
+    const status = [
+      current.at ? `取得于 ${clockLabel(current.at)}` : "",
+      current.status === "error" ? (current.at ? "最近一次获取失败，显示的是之前的结果" : "获取失败，下次更新会重试") : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return (
+      <section className="r-ranking">
+        <header className="r-section-head">
+          <h2>GitHub 榜单</h2>
+          <small>{status}</small>
+        </header>
+        <div className="r-chips wrap" aria-label="榜单">
+          {rankings.map((r) => (
+            <button
+              key={r.id}
+              className={r.id === current.id ? "active" : ""}
+              aria-pressed={r.id === current.id}
+              onClick={() => goTrend({ company: r.id, product: "" })}
+            >
+              {rankingLabel[r.id] || r.name}
+              <small>{r.rows.length}</small>
+            </button>
+          ))}
+        </div>
+        {current.rows.length ? (
+          <ol className="r-repos">
+            {current.rows.map((repo, i) => (
+              <li key={repo.name}>
+                <span className="r-repo-n" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <div className="r-repo-body">
+                  <a href={repo.url} target="_blank" rel="noreferrer">
+                    <strong>{repo.name}</strong>
+                    <Glyph name="external" size={13} />
+                  </a>
+                  {repo.description && <p>{repo.description}</p>}
+                  <small>
+                    {repoMeta(repo, current.id)}
+                    {repo.flags.map((f) => (
+                      <em key={f} className="r-badge warn">
+                        {repoFlagLabel[f] || f}
+                      </em>
+                    ))}
+                  </small>
+                </div>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="r-muted">
+            {current.status === "error"
+              ? "获取失败，下次更新会重试。"
+              : current.status === "not_checked" || !current.status
+                ? "还没有取得这个榜单，下次更新后显示。"
+                : "这次的榜单里没有 AI 相关项目。"}
+          </p>
+        )}
+        <p className="r-card-text">
+          {current.description} 只保留 AI 相关项目。star 代表关注度，不代表质量；「热度存疑」只按 fork
+          与 star 的比例标注，仅供参考。
+        </p>
+      </section>
+    );
+  }
+
   function trendSubtitle() {
     if (trend.lens !== "company") return lensNote[trend.lens];
     return "各公司自己做了什么：实心为官方来源，空心为只有媒体报道";
@@ -1657,6 +1732,13 @@ export default function ReaderApp() {
       return (
         <>
           {tabs}
+          {trend.lens === "community" && rankingPanel()}
+          {trend.lens === "community" && list.length > 0 && (
+            <header className="r-section-head">
+              <h2>版本发布与社区发言</h2>
+              <small>整理过的开源项目发布与社区内容</small>
+            </header>
+          )}
           {list.length ? (
             <>
               <div className="r-list-stories r-grid">

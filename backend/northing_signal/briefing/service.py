@@ -13,6 +13,7 @@ from .collect import collect, enrich
 from .discover import discover
 from .engine import active_actions, frame_key, occurrences, project, stamp, text_key
 from .events import assign, frame_of, resolve
+from .github import KINDS as RANKINGS
 from .intent import IntentEngine, recall_candidates
 from .lenses import Lenses
 from .models import (
@@ -153,7 +154,8 @@ class ContentService:
                      queue=[self.visible_run(r, user) for r in self.queued()],
                      policy=POLICY_HASH,
                      last_visit=self.store.last_visit(user),
-                     previous_visit=self.store.previous_visit(user))
+                     previous_visit=self.store.previous_visit(user),
+                     rankings=self.rankings())
         _, upcoming = refresh_slots(datetime.now(timezone.utc), self.zone())
         value["schedule"] = {"enabled": value["preferences"]["auto_refresh"], "hours": list(REFRESH_HOURS),
                              "next": upcoming.astimezone(timezone.utc).isoformat()}
@@ -429,8 +431,29 @@ class ContentService:
                 "snapshot_kind": (run or {}).get("kind"), "snapshot_trigger": (run or {}).get("trigger"),
                 "headlines": [titles[i] for i in value["focus"][:3] if i in titles]}
 
+    def github_token(self):
+        token = getattr(self.settings, "reader_github_token", None)
+        return token.get_secret_value() if token else ""
+
+    def rankings(self):
+        """Open source rankings from the latest update: each list with its time and status."""
+        states = self.store.source_states()
+        result = []
+        for source in self.sources:
+            if source["kind"] not in RANKINGS:
+                continue
+            state = states.get(source["id"], {"status": "not_checked"})
+            result.append({"id": source["id"], "name": source["name"], "kind": source["kind"],
+                           "url": source.get("original_url", source["url"]),
+                           "description": source.get("description", ""),
+                           "status": state.get("status"), "error": state.get("error"),
+                           "at": state.get("ranking_at"), "rows": state.get("ranking", [])})
+        return result
+
     def source_list(self):
         states = self.store.source_states()
+        # Ranking rows are shown on the trends page, not repeated in every source status.
+        states = {k: {f: v for f, v in s.items() if f != "ranking"} for k, s in states.items()}
         result = [{**{k: s[k] for k in ("id", "name", "role", "url", "kind")},
                    "url": s.get("original_url", s["url"]),
                    "description": s.get("description", ""), "priority": s.get("priority", 1),
@@ -468,7 +491,8 @@ class ContentService:
                 if plan and not follow.get("confirmed_at"):
                     raise ValueError("追踪方案尚未确认")
                 if (not plan or plan["include_feeds"]) and (self.last_topic_collection is None or time.monotonic() - self.last_topic_collection >= 1800):
-                    await collect(self.store, self.sources, limit=3)
+                    # Topic follows need articles; the rankings wait for the next update.
+                    await collect(self.store, [s for s in self.sources if s["kind"] not in RANKINGS], limit=3)
                     self.last_topic_collection = time.monotonic()
                 if plan:
                     related = recall_candidates(plan, await asyncio.to_thread(self.store.materials), self.store.intent_assessments(follow["plan_hash"]), self.store.judgments())
@@ -718,7 +742,8 @@ class ContentService:
             run["current_source"] = name
         self.store.record_refresh(run)
         try:
-            await collect(self.store, self.sources, request.limit_per_source, progress)
+            await collect(self.store, self.sources, request.limit_per_source, progress,
+                          github_token=self.github_token())
             run["stage"] = "reading"
             await enrich(self.store, limit=min(24, request.analyze_limit))
             run["stage"] = "understanding"
