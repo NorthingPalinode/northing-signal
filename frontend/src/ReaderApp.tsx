@@ -3,7 +3,7 @@ import { searchSources, sourceName, type SearchSource } from "./searchSources";
 import FollowIntentForm, { intervalLabel } from "./FollowIntentForm";
 import StoryReader, { DetailActions, FeedbackChoices } from "./StoryDetail";
 import { Glyph, Sheet, Toast } from "./ui";
-import { accountLabel, auth, quotaLabel, signedOut } from "./auth";
+import { accountLabel, auth, failureMessage, quotaLabel, reach, signedOut } from "./auth";
 import brandMark from "./assets/brand.svg?no-inline";
 
 import {
@@ -46,16 +46,13 @@ import type {
 const currentPage = (): Page => pageFromHash(window.location.hash);
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch("/api/reader" + path, {
+  const response = await reach("/api/reader" + path, {
     ...options,
     headers: { "Content-Type": "application/json", ...options.headers },
   });
   const value = await response.json().catch(() => ({}));
   if (response.status === 401) signedOut();
-  if (!response.ok)
-    throw new Error(
-      typeof value.detail === "string" ? value.detail : "暂时无法完成，请重试。",
-    );
+  if (!response.ok) throw new Error(failureMessage(response.status, value));
   return value;
 }
 

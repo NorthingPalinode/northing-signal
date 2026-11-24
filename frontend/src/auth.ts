@@ -30,15 +30,35 @@ export function onSignedOut(listener: () => void) {
   return () => window.removeEventListener(SIGNED_OUT, listener);
 }
 
+export const OFFLINE = "连不上后台服务，它可能已经停止。请稍后重试；一直这样请联系管理员。";
+// What a proxy in front of a stopped server answers: Cloudflare (52x, 530) or a gateway (502-504).
+const UNREACHABLE = new Set([502, 503, 504, 520, 521, 522, 523, 524, 530]);
+
+/** The server's own explanation when it gave one; otherwise say whether it could be reached. */
+export function failureMessage(status: number, value: unknown, fallback = "暂时无法完成，请重试。") {
+  const detail = (value as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string") return detail;
+  return UNREACHABLE.has(status) ? OFFLINE : fallback;
+}
+
+/** fetch, with "no connection at all" turned into the same readable message. */
+export async function reach(url: string, init?: RequestInit) {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw e;
+    throw new Error(OFFLINE);
+  }
+}
+
 export async function auth<T>(path: string, method: "GET" | "POST" = "GET", body?: unknown): Promise<T> {
-  const response = await fetch("/api/auth" + path, {
+  const response = await reach("/api/auth" + path, {
     method,
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
   const value = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(typeof value.detail === "string" ? value.detail : "暂时无法完成，请重试。");
+  if (!response.ok) throw new Error(failureMessage(response.status, value));
   return value;
 }
 

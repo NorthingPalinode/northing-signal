@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { signedOut } from "./auth";
+import { failureMessage, reach, signedOut } from "./auth";
 import type { View } from "./reader/types";
 import { searchSources, sourceName, type SearchSource } from "./searchSources";
 
@@ -50,20 +50,16 @@ export default function FollowIntentForm({
     pending.current?.abort();
     const controller = new AbortController();
     pending.current = controller;
-    const response = await fetch("/api/reader/follows" + path, {
+    const response = await reach("/api/reader/follows" + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    const result = await response.json();
+    const result = await response.json().catch(() => ({}));
     if (response.status === 401) signedOut();
     if (!response.ok)
-      throw new Error(
-        typeof result.detail === "string"
-          ? result.detail
-          : "方案内容不完整，请检查后重试。",
-      );
+      throw new Error(failureMessage(response.status, result, "方案内容不完整，请检查后重试。"));
     return result;
   }
   async function interpret() {
