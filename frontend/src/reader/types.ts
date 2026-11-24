@@ -26,6 +26,7 @@ export type Entry = {
   title: string;
   summary: string;
   source: string;
+  source_id?: string;
   role: string;
   url: string;
   published_at: string | null;
@@ -82,6 +83,11 @@ export type Story = {
   heat_trend?: "rising" | null;
   /** Rule-written line on where the evidence comes from (who states it, who tested, sources). */
   standing?: string;
+  /** Companies that act in this story; official: one of its reports is the company's own. */
+  companies?: { id: string; official: boolean; products: string[] }[];
+  /** Companies only mentioned (a customer, a lawsuit, someone else's test). */
+  mentions?: string[];
+  lenses?: ("company" | "community" | "research" | "policy")[];
   first_captured_at?: string;
   latest_captured_at?: string;
   /** Known before the latest update: it has left the focus. Marked since: only greyed. */
@@ -185,6 +191,8 @@ export type View = {
   last_visit?: string | null;
   /** When the reader last came before this sitting (visits under 30 minutes apart are one). */
   previous_visit?: string | null;
+  /** The editable company table: companies and their product groups, in display order. */
+  companies?: { id: string; name: string; products: { id: string; name: string }[] }[];
   events: Story[];
   focus: string[];
   radar: string[];
@@ -220,6 +228,7 @@ export type View = {
 };
 export type Page =
   | "briefing"
+  | "trends"
   | "discover"
   | "following"
   | "saved"

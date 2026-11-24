@@ -293,7 +293,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         if dismissed:
             score -= 20
         timeline = [{"version": m.version, "title": b.title or m.title, "summary": b.summary,
-                     "source": m.source_name, "role": m.source_role, "url": m.url,
+                     "source": m.source_name, "source_id": m.source_id, "role": m.source_role, "url": m.url,
                      "published_at": m.published_at, "captured_at": m.captured_at, "action": b.action,
                      "content_kind": m.content_kind,
                      "evidence": b.evidence, "claims": [c.model_dump() for c in b.claims],

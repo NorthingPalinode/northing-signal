@@ -863,6 +863,243 @@ code {
   letter-spacing: 0.02em;
 }
 
+/* ---------- trends: lenses and company lines ---------- */
+
+.r-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.r-tabs button {
+  flex: 1 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+.r-tabs button.selected {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.r-tabs small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--faint);
+}
+.r-chips.wrap {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.r-chips b {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+.r-line {
+  margin-bottom: 20px;
+}
+.r-line-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.r-line-days > li > h3 {
+  margin: 14px 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.r-line-days ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 9px;
+  border-left: 2px solid var(--line);
+}
+.r-node button {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 0;
+  text-align: left;
+}
+.r-node-dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin: 6px 0 0 -15px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--accent);
+}
+.r-node.reported .r-node-dot {
+  background: var(--bg);
+}
+.r-node.major .r-node-dot {
+  width: 14px;
+  height: 14px;
+  margin: 4px 0 0 -17px;
+}
+.r-node:not(.major) .r-node-dot {
+  border-color: var(--line-strong);
+}
+.r-node:not(.major).official .r-node-dot {
+  background: var(--line-strong);
+}
+.r-node-body {
+  min-width: 0;
+}
+.r-node-body strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.r-node.major .r-node-body strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+.r-node-body strong .r-badge {
+  margin-left: 8px;
+  vertical-align: 2px;
+  font-style: normal;
+}
+.r-node-body small {
+  display: block;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.r-node button:hover strong {
+  color: var(--accent-text);
+}
+.r-node.known strong {
+  color: var(--muted);
+}
+
+/* ---------- a story's evidence timeline ---------- */
+
+.r-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 9px;
+  border-left: 2px solid var(--line);
+}
+.r-stage {
+  display: flex;
+  gap: 12px;
+  padding: 0 0 16px;
+}
+.r-stage-dot {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin: 5px 0 0 -16px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: var(--surface);
+}
+.r-stage.s-statement .r-stage-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.r-stage.s-test .r-stage-dot {
+  border-color: var(--warn);
+  background: var(--warn);
+}
+.r-stage.s-change .r-stage-dot {
+  border-color: var(--danger);
+  background: var(--surface);
+}
+.r-stage.gap .r-stage-dot {
+  border-style: dashed;
+  background: var(--bg);
+}
+.r-stage.gap .r-stage-body {
+  padding: 6px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.r-stage-body {
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+}
+.r-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0;
+}
+.r-stage-head strong {
+  font-size: 14px;
+}
+.r-stage-day {
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent-text);
+}
+.r-stage-head small,
+.r-stage.gap small {
+  font-size: 12px;
+  color: var(--faint);
+}
+.r-stage-body > a {
+  display: block;
+  margin-top: 2px;
+}
+.r-stage-body > a:hover {
+  color: var(--accent-text);
+}
+.r-stage-body .r-link {
+  margin-left: 0;
+}
+.r-checklist {
+  list-style: none;
+  margin: 4px 0 12px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--faint);
+}
+.r-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+.r-checklist li.ok {
+  color: var(--ink);
+}
+.r-checklist li.ok svg {
+  color: var(--accent-text);
+}
+.r-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 /* ---------- since the last visit ---------- */
 
 .r-delta {

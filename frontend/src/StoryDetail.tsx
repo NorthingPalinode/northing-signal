@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { Glyph } from "./ui";
-import { actionLabel, evidence, hasAction, mergeCandidates, when } from "./reader/logic";
+import {
+  actionLabel,
+  evidence,
+  evidenceChecklist,
+  evidenceStages,
+  hasAction,
+  mergeCandidates,
+  stageLabel,
+  when,
+} from "./reader/logic";
 import type { Action, Story, View } from "./reader/types";
 
 /** Reasons for "not interested". Knowing a story is its own toggle, not a reason here. */
@@ -152,6 +161,7 @@ export default function StoryReader({
     (a) => !["shown", "opened"].includes(a.kind),
   );
   const minutes = Math.max(1, Math.round(story.reading_seconds / 60));
+  const stages = evidenceStages(story);
   return (
     <div className="r-reader">
       <article className="r-detail">
@@ -191,6 +201,60 @@ export default function StoryReader({
             <p>{story.reason}</p>
           </div>
         )}
+
+        <section className="r-evidence">
+          <h2>
+            证据时间线
+            <small>
+              {story.report_count} 篇报道 · {story.source_count} 个来源
+            </small>
+          </h2>
+          <ol className="r-stages">
+            {stages.nodes.map(({ entry: t, stage, label, day }) => (
+              <li key={t.version} className={"r-stage s-" + stage}>
+                <span className="r-stage-dot" aria-hidden="true" />
+                <div className="r-stage-body">
+                  <p className="r-stage-head">
+                    <strong>{label}</strong>
+                    {day !== null && <span className="r-stage-day">D{day}</span>}
+                    <small>
+                      {stageLabel[stage]} · {when(t.published_at, t.captured_at)} · {t.source}
+                    </small>
+                  </p>
+                  <a href={t.url} target="_blank" rel="noreferrer">
+                    {t.title}
+                  </a>
+                  {!historical && canRegroup && story.timeline.length > 1 && (
+                    <button
+                      className="r-link small"
+                      aria-label={"不是同一件事：" + t.title}
+                      onClick={() =>
+                        regroup(
+                          "split",
+                          { version: t.version },
+                          "已拆分为单独的事件，之后不会自动并回。",
+                        )
+                      }
+                    >
+                      不是同一件事？拆分
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+            {stages.gaps.map((gap) => (
+              <li key={gap} className="r-stage gap">
+                <span className="r-stage-dot" aria-hidden="true" />
+                <div className="r-stage-body">
+                  <p className="r-stage-head">
+                    <strong>{gap}</strong>
+                  </p>
+                  <small>只指本项目已收取的报道；出现后会并入这条时间线。</small>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
 
         <section>
           <h2>
@@ -268,44 +332,6 @@ export default function StoryReader({
           </ul>
         </section>
 
-        {story.timeline.length > 1 && (
-          <section>
-            <h2>
-              报道与进展
-              <small>
-                {story.report_count} 篇报道 · {story.source_count} 个来源
-              </small>
-            </h2>
-            <ol className="r-timeline">
-              {[...story.timeline].reverse().map((t) => (
-                <li key={t.version}>
-                  <small>
-                    {when(t.published_at)} · {actionLabel[t.action]} · {t.source}
-                  </small>
-                  <a href={t.url} target="_blank" rel="noreferrer">
-                    {t.title}
-                  </a>
-                  {!historical && canRegroup && (
-                    <button
-                      className="r-link small"
-                      aria-label={"不是同一件事：" + t.title}
-                      onClick={() =>
-                        regroup(
-                          "split",
-                          { version: t.version },
-                          "已拆分为单独的事件，之后不会自动并回。",
-                        )
-                      }
-                    >
-                      不是同一件事？拆分
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </section>
-        )}
-
         {candidates.length > 0 && (
           <details className="r-fold">
             <summary>和另一条事件重复？</summary>
@@ -362,13 +388,20 @@ export default function StoryReader({
             <dd>{story.source}</dd>
             <dt>时间</dt>
             <dd>{when(story.published_at, story.captured_at)}</dd>
-            <dt>依据</dt>
-            <dd>{evidence(story.evidence, story.source_role, kind)}</dd>
             <dt>报道</dt>
             <dd>
               {story.report_count} 篇 · {story.source_count} 个来源
             </dd>
           </dl>
+          <ul className="r-checklist" aria-label="依据清单">
+            {evidenceChecklist(story).map((item) => (
+              <li key={item.label} className={item.ok ? "ok" : ""}>
+                <Glyph name={item.ok ? "check" : "minus"} size={14} />
+                {item.label}
+                <span className="r-visually-hidden">{item.ok ? "：有" : "：未见"}</span>
+              </li>
+            ))}
+          </ul>
           <a
             className="r-button block"
             href={story.url}

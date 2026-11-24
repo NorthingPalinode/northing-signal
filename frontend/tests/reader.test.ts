@@ -14,6 +14,15 @@ import {
   setDisplayZone,
   siteZoneLabel,
   sinceVisit,
+  companyLine,
+  companyMentions,
+  evidenceChecklist,
+  evidenceStages,
+  lensStories,
+  lineCounts,
+  pageFromHash as pageOf,
+  trendFromHash,
+  trendHash,
   statusLabel,
   storyFromHash,
   todayLabel,
@@ -232,4 +241,73 @@ test("since the last visit lists new and changed stories the reader has not read
   );
   assert.equal(sinceVisit(list, null), null);
   assert.deepEqual(sinceVisit([list[5]], since), []);
+});
+
+const entry = (role: string, changes: Record<string, unknown> = {}) => ({
+  version: role + Math.random(), title: "t", summary: "", source: role, role, url: "",
+  published_at: "2026-11-20T00:00:00Z", captured_at: "2026-11-20T01:00:00Z", action: "release",
+  evidence: "source_attributed", claims: [], conditions: [], limitations: [], content_kind: "feed_excerpt",
+  ...changes,
+});
+
+test("trends keep their lens, company and product in the hash", () => {
+  assert.equal(pageOf("#trends/company/openai/chatgpt"), "trends");
+  assert.deepEqual(trendFromHash("#trends/company/openai/chatgpt"), { lens: "company", company: "openai", product: "chatgpt" });
+  assert.deepEqual(trendFromHash("#trends"), { lens: "company", company: "", product: "" });
+  assert.deepEqual(trendFromHash("#trends/bogus"), { lens: "company", company: "", product: "" });
+  assert.equal(trendHash({ lens: "research", company: "", product: "" }), "trends/research");
+});
+
+test("a company line holds what it did; mentions and dismissed stories stay off it", () => {
+  const own = (id: string, products: string[], changes: Partial<Story> = {}) =>
+    story(id, { companies: [{ id: "openai", official: true, products }], lenses: ["company"], ...changes });
+  const events = [
+    own("launch", ["chatgpt", "api"], { published_at: "2026-11-24T00:00:00Z" }),
+    own("api", ["api"], { published_at: "2026-11-23T00:00:00Z" }),
+    own("gone", ["api"], { dismissed: true }),
+    story("customer", { mentions: ["openai"], lenses: [] }),
+    story("paper", { lenses: ["research"] }),
+  ];
+  assert.deepEqual(companyLine(events, "openai").map((s) => s.id), ["launch", "api"]);
+  assert.deepEqual(companyLine(events, "openai", "chatgpt").map((s) => s.id), ["launch"]);
+  assert.deepEqual(companyMentions(events, "openai").map((s) => s.id), ["customer"]);
+  assert.deepEqual(lensStories(events, "research").map((s) => s.id), ["paper"]);
+  const counts = lineCounts(events, "openai");
+  assert.equal(counts.companies.openai, 2);
+  assert.deepEqual(counts.products, { chatgpt: 1, api: 2 });
+});
+
+test("the evidence timeline orders stages, counts days and names missing ones", () => {
+  const launch = story("x", {
+    action: "release",
+    timeline: [
+      entry("media", { published_at: "2026-11-21T00:00:00Z" }),
+      entry("official"),
+      entry("official", { published_at: "2026-11-22T00:00:00Z", evidence: "reported_test", action: "test" }),
+    ],
+  });
+  const { nodes, gaps } = evidenceStages(launch);
+  assert.deepEqual(nodes.map((n) => [n.stage, n.label, n.day]), [
+    ["statement", "官方原文", 0],
+    ["coverage", "报道转述", 1],
+    ["test", "厂商自测", 2],
+  ]);
+  assert.deepEqual(gaps, ["尚未见他方测试"]);
+  assert.deepEqual(
+    evidenceChecklist(launch).map((i) => i.ok),
+    [true, true, false, false],
+  );
+  const relayed = story("y", {
+    action: "release",
+    timeline: [
+      entry("media", { evidence: "reported_test" }),
+      entry("media", { published_at: "2026-11-23T00:00:00Z", action: "correction" }),
+    ],
+  });
+  const second = evidenceStages(relayed);
+  assert.deepEqual(second.nodes.map((n) => [n.stage, n.label]), [
+    ["test", "媒体或作者报告的测试"],
+    ["change", "更正"],
+  ]);
+  assert.deepEqual(second.gaps, ["未见官方或论文原文"]);
 });

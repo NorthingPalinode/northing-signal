@@ -20,6 +20,17 @@ import {
   setDisplayZone,
   siteZoneLabel,
   sinceVisit,
+  companyLine,
+  companyMentions,
+  dayLabel,
+  isMajor,
+  lensLabel,
+  lensStories,
+  lineCounts,
+  trendFromHash,
+  trendHash,
+  type Lens,
+  type Trend,
   statusLabel,
   snapshotLabel,
   storyFromHash,
@@ -59,12 +70,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 const primaryNav: [Page, string, string][] = [
   ["briefing", "home", "简报"],
+  ["trends", "signal", "动向"],
   ["discover", "search", "搜索"],
   ["following", "follow", "追踪"],
   ["saved", "bookmark", "收藏"],
 ];
 const pageTitle: Record<Page, string> = {
   briefing: "今日简报",
+  trends: "动向",
   discover: "搜索与发现",
   following: "话题追踪",
   saved: "我的收藏",
@@ -73,6 +86,7 @@ const pageTitle: Record<Page, string> = {
 };
 const backLabel: Record<Page, string> = {
   briefing: "简报",
+  trends: "动向",
   discover: "搜索",
   following: "追踪",
   saved: "收藏",
@@ -80,6 +94,12 @@ const backLabel: Record<Page, string> = {
   story: "简报",
 };
 const dismissKinds = ["irrelevant", "thin", "duplicate"];
+const lensNote: Record<Lens, string> = {
+  company: "",
+  community: "开源项目的版本发布与社区发言",
+  research: "论文、研究博客与他方评测",
+  policy: "监管、出口管制、投融资、并购与人事",
+};
 
 /** Sends a one-off "shown" interaction the first time a story is on screen. */
 function useExposure(
@@ -411,6 +431,7 @@ export default function ReaderApp() {
     "all" | "pending" | "failed"
   >("all");
   const [showAllMore, setShowAllMore] = useState(false);
+  const [trend, setTrend] = useState<Trend>(() => trendFromHash(window.location.hash));
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<Snapshot[] | null>(null);
   const [report, setReport] = useState<{
@@ -451,6 +472,7 @@ export default function ReaderApp() {
       const next = currentPage();
       setPage(next);
       setStoryId(storyFromHash(window.location.hash));
+      if (next === "trends") setTrend(trendFromHash(window.location.hash));
       // Coming back from a story: return to the same place in the list.
       if (next !== "story" && scrollMemo.current?.page === next)
         restoreY.current = scrollMemo.current.y;
@@ -668,6 +690,13 @@ export default function ReaderApp() {
     window.location.hash = "story/" + encodeURIComponent(story.id);
   }
   /** Prev/next replace the history entry so Back always returns to the list. */
+  /** Switch lens, company or product group; the hash keeps the place for Back and reloads. */
+  function goTrend(next: Partial<Trend>) {
+    const value = { ...trend, ...next };
+    setTrend(value);
+    setShowAllMore(false);
+    window.location.hash = trendHash(value);
+  }
   function goStory(id: string) {
     window.location.replace("#story/" + encodeURIComponent(id));
   }
@@ -1597,6 +1626,198 @@ export default function ReaderApp() {
     );
   }
 
+  function trendSubtitle() {
+    if (trend.lens !== "company") return lensNote[trend.lens];
+    return "各公司自己做了什么：实心为官方来源，空心为只有媒体报道";
+  }
+
+  function trendsPage() {
+    if (!view) return null;
+    const catalog = view.companies || [];
+    const counts = lineCounts(all);
+    const tabs = (
+      <div className="r-tabs" role="tablist" aria-label="板块">
+        {(Object.keys(lensLabel) as Lens[]).map((id) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={trend.lens === id}
+            className={trend.lens === id ? "selected" : ""}
+            onClick={() => goTrend({ lens: id, company: "", product: "" })}
+          >
+            {lensLabel[id]}
+            <small>{lensStories(all, id).length}</small>
+          </button>
+        ))}
+      </div>
+    );
+    if (trend.lens !== "company") {
+      const list = lensStories(all, trend.lens);
+      const shown = showAllMore ? list : list.slice(0, 24);
+      return (
+        <>
+          {tabs}
+          {list.length ? (
+            <>
+              <div className="r-list-stories r-grid">
+                {shown.map((s) => row(s, "normal", { list }))}
+              </div>
+              {list.length > shown.length && (
+                <button className="r-button block" onClick={() => setShowAllMore(true)}>
+                  显示全部 {list.length} 条
+                </button>
+              )}
+            </>
+          ) : (
+            <Empty icon="compass" title={`「${lensLabel[trend.lens]}」暂时没有内容`}>
+              <p>更新后，整理好的相关进展会出现在这里。</p>
+            </Empty>
+          )}
+        </>
+      );
+    }
+    const ranked = catalog
+      .filter((c) => counts.companies[c.id])
+      .sort((a, b) => counts.companies[b.id] - counts.companies[a.id]);
+    const company = catalog.find((c) => c.id === trend.company) || ranked[0];
+    if (!company)
+      return (
+        <>
+          {tabs}
+          <Empty icon="compass" title="还没有能归到公司的进展">
+            <p>公司与产品的对应关系在 data/companies.json 中，可以直接编辑。</p>
+          </Empty>
+        </>
+      );
+    const { products } = lineCounts(all, company.id);
+    const line = companyLine(all, company.id, trend.product);
+    const shown = showAllMore ? line : line.slice(0, 40);
+    const mentions = companyMentions(all, company.id);
+    const fresh = new Set((sinceVisit(line, view.previous_visit) || []).map((c) => c.story.id));
+    const days: [string, Story[]][] = [];
+    for (const s of shown) {
+      const day = dayLabel(s.published_at, s.captured_at);
+      const last = days[days.length - 1];
+      if (last && last[0] === day) last[1].push(s);
+      else days.push([day, [s]]);
+    }
+    return (
+      <>
+        {tabs}
+        <div className="r-chips wrap" aria-label="公司">
+          {ranked.map((c) => {
+            const news = (sinceVisit(companyLine(all, c.id), view.previous_visit) || []).length;
+            return (
+              <button
+                key={c.id}
+                className={c.id === company.id ? "active" : ""}
+                aria-pressed={c.id === company.id}
+                onClick={() => goTrend({ company: c.id, product: "" })}
+              >
+                {c.name}
+                <small>{counts.companies[c.id]}</small>
+                {news > 0 && <b title="自你上次来的新动作">{news}</b>}
+              </button>
+            );
+          })}
+        </div>
+        <section className="r-line">
+          <header className="r-section-head">
+            <h2>{company.name}</h2>
+            <small>
+              {line.length} 个动作
+              {fresh.size ? ` · 自你上次来 ${fresh.size} 个` : ""}
+            </small>
+          </header>
+          <div className="r-chips wrap" aria-label="产品">
+            <button
+              className={!trend.product ? "active" : ""}
+              aria-pressed={!trend.product}
+              onClick={() => goTrend({ product: "" })}
+            >
+              全部
+            </button>
+            {company.products
+              .filter((p) => products[p.id])
+              .map((p) => (
+                <button
+                  key={p.id}
+                  className={trend.product === p.id ? "active" : ""}
+                  aria-pressed={trend.product === p.id}
+                  onClick={() => goTrend({ product: p.id })}
+                >
+                  {p.name}
+                  <small>{products[p.id]}</small>
+                </button>
+              ))}
+          </div>
+          {days.length ? (
+            <ol className="r-line-days">
+              {days.map(([day, stories]) => (
+                <li key={day}>
+                  <h3>{day}</h3>
+                  <ul>
+                    {stories.map((s) => {
+                      const own = s.companies?.find((c) => c.id === company.id);
+                      const major = isMajor(s);
+                      return (
+                        <li
+                          key={s.id}
+                          className={
+                            "r-node" +
+                            (major ? " major" : "") +
+                            (own?.official ? " official" : " reported") +
+                            (s.known ? " known" : "")
+                          }
+                        >
+                          <button onClick={() => open(s, shown)}>
+                            <span className="r-node-dot" aria-hidden="true" />
+                            <span className="r-node-body">
+                              <strong>
+                                {s.title}
+                                {fresh.has(s.id) && <em className="r-badge new">新</em>}
+                              </strong>
+                              <small>
+                                {[
+                                  actionLabel[s.action],
+                                  own?.official ? "" : "媒体报道，未见官方",
+                                  major ? s.standing : s.source,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </small>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="r-muted">这个产品暂时没有动作。</p>
+          )}
+          {line.length > shown.length && (
+            <button className="r-button block" onClick={() => setShowAllMore(true)}>
+              显示全部 {line.length} 个动作
+            </button>
+          )}
+        </section>
+        {mentions.length > 0 && (
+          <details className="r-fold">
+            <summary>
+              关于 {company.name} 的其他报道（{mentions.length}）：客户、诉讼、他方测试等，不算它自己的动作
+            </summary>
+            <div className="r-list-stories">
+              {mentions.slice(0, 30).map((s) => row(s, "compact", { list: mentions }))}
+            </div>
+          </details>
+        )}
+      </>
+    );
+  }
+
   function savedPage() {
     if (!view) return null;
     const allSaved = view.saved_events || all.filter((e) => e.saved);
@@ -1978,7 +2199,9 @@ export default function ReaderApp() {
         ]
           .filter(Boolean)
           .join(" · ")
-      : page === "following"
+      : page === "trends"
+        ? trendSubtitle()
+        : page === "following"
         ? `${follows.length} 个话题${unreadFollows ? ` · ${unreadFollows} 条新进展` : ""}`
         : page === "saved"
           ? `${savedCount} 条收藏`
@@ -2179,6 +2402,8 @@ export default function ReaderApp() {
               </div>
             ) : page === "briefing" ? (
               briefingPage()
+            ) : page === "trends" ? (
+              trendsPage()
             ) : page === "discover" ? (
               discoverPage()
             ) : page === "following" ? (
