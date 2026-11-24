@@ -171,3 +171,18 @@ def test_material_version_follows_copied_fields():
     revised = item.model_copy(update={"text": item.text + " Updated."})
     assert revised.version != item.version
     assert material().version == item.version
+
+
+def test_previous_visit_skips_this_sitting(tmp_path):
+    """"Since you were last here": reloading the page within a sitting keeps the same anchor."""
+    store = Store(tmp_path / "reader.db")
+    clock = datetime(2026, 11, 24, 12, tzinfo=timezone.utc)
+    assert store.previous_visit(at=clock) is None
+    with store.connection() as db:
+        for key, minutes in [("yesterday", 24 * 60), ("morning", 3 * 60), ("now-1", 20), ("now-2", 5)]:
+            db.execute("INSERT INTO visits VALUES (?, ?, ?)",
+                       ("local", key, (clock - timedelta(minutes=minutes)).isoformat()))
+        db.execute("INSERT INTO visits VALUES (?, ?, ?)", ("someone", "other", (clock - timedelta(hours=1)).isoformat()))
+    assert store.previous_visit(at=clock) == (clock - timedelta(hours=3)).isoformat()
+    assert store.previous_visit("someone", at=clock) == (clock - timedelta(hours=1)).isoformat()
+    assert store.previous_visit(at=clock - timedelta(hours=2, minutes=50)) == (clock - timedelta(hours=24)).isoformat()

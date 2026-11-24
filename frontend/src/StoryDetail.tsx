@@ -178,6 +178,12 @@ export default function StoryReader({
             `约 ${minutes} 分钟`,
           ].join(" · ")}
         </p>
+        {story.standing && (
+          <p className="r-standing">
+            <strong>依据</strong>
+            {story.standing}
+          </p>
+        )}
         <p className="r-detail-summary">{story.summary}</p>
         {story.reason && (
           <div className="r-callout">

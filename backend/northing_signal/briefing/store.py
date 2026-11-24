@@ -14,6 +14,7 @@ from .models import POLICY_EPOCH, Interaction, Material, Preferences, digest, no
 
 LOCAL_USER = "local"  # owner of rows written before accounts existed, and of auth-off installs
 TOKEN_PREFIX = "nst_"
+SESSION_GAP = timedelta(minutes=30)  # visits closer than this are one sitting
 CONTENT_TABLES = ("materials", "judgments")  # judgment_failures joins in migration 3
 READER_TABLES = ("interactions", "preferences", "follows", "intent_assessments")
 EVENT_TABLES = ("events", "event_members", "event_aliases")  # count as content: they regroup the briefing
@@ -557,6 +558,23 @@ class Store:
             row = db.execute("SELECT created_at FROM visits WHERE user_id=? ORDER BY rowid DESC LIMIT 1",
                              (user,)).fetchone()
             return row["created_at"] if row else None
+
+    def previous_visit(self, user=LOCAL_USER, at=None, gap=SESSION_GAP):
+        """When the reader last came before this sitting: "since you were last here".
+
+        A sitting is a run of visits less than `gap` apart reaching up to `at` (now), so reloading
+        the page keeps the same answer. None for a first visit or when every visit is this sitting.
+        """
+        clock = at or datetime.now(timezone.utc)
+        with self.connection() as db:
+            rows = db.execute("SELECT created_at FROM visits WHERE user_id=? ORDER BY rowid DESC LIMIT 500",
+                              (user,)).fetchall()
+        for row in rows:
+            when = datetime.fromisoformat(row["created_at"])
+            if clock - when >= gap:
+                return row["created_at"]
+            clock = min(clock, when)
+        return None
 
     def snapshots(self, key=None, user=LOCAL_USER):
         with self.connection() as db:

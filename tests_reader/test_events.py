@@ -168,3 +168,21 @@ def test_split_and_merge_move_materials_and_reader_actions_follow(tmp_path):
     # A new report of the split-out story does not get pulled back automatically.
     service = ContentService(Store(store.path), settings())
     assert ids(service.view())[b.version] == split
+
+
+def test_evidence_line_names_who_states_and_who_tested():
+    from northing_signal.briefing.engine import standing
+
+    def row(role, evidence="source_attributed", action="release", kind="publisher_excerpt"):
+        return {"role": role, "evidence": evidence, "action": action, "content_kind": kind}
+
+    assert standing([row("official")]) == "有官方原文"
+    assert standing([row("official", "reported_test", "test")]) == "有官方原文 · 厂商自测，未见他方测试"
+    assert standing([row("research", "reported_test")]) == "有论文原文 · 论文自报结果"
+    assert standing([row("media"), row("author")], 2) == "媒体或作者转述，未见官方原文 · 2 个来源"
+    assert standing([row("author", "opinion", "explain")]) == "作者观点"
+    assert standing([row("community", kind="community_post")]) == "仅社区发言"
+    assert standing([row("official"), row("media", action="correction")], 2) == "有官方原文 · 2 个来源 · 含更正或撤回"
+    assert standing([row("research", kind="benchmark_snapshot")]) == "公开榜单数据"
+    assert standing([row("media", "reported_test", "test", "benchmark_snapshot")]) == "公开榜单数据"
+    assert standing([row("community", "reported_test", kind="community_post")]) == "仅社区发言 · 社区发言中报告了测试"

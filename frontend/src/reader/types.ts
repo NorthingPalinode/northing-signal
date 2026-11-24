@@ -29,6 +29,7 @@ export type Entry = {
   role: string;
   url: string;
   published_at: string | null;
+  captured_at?: string;
   action: string;
   evidence: string;
   claims: Claim[];
@@ -79,6 +80,10 @@ export type Story = {
   /** Independent outlets reporting within 48 h, each once, halving daily. */
   heat?: number;
   heat_trend?: "rising" | null;
+  /** Rule-written line on where the evidence comes from (who states it, who tested, sources). */
+  standing?: string;
+  first_captured_at?: string;
+  latest_captured_at?: string;
   /** Known before the latest update: it has left the focus. Marked since: only greyed. */
   known_earlier?: boolean;
   score?: number;
@@ -178,6 +183,8 @@ export type View = {
   /** zone: what this reader sees dates in; site: schedule, quotas and digest dates. */
   timezone?: { zone: string; site: string; options: { id: string; label: string }[] };
   last_visit?: string | null;
+  /** When the reader last came before this sitting (visits under 30 minutes apart are one). */
+  previous_visit?: string | null;
   events: Story[];
   focus: string[];
   radar: string[];
