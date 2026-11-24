@@ -13,6 +13,7 @@ export const topics: Record<Topic, string> = {
 export function pageFromHash(hash: string): Page {
   const value = hash.replace(/^#/, "");
   if (storyFromHash(value)) return "story";
+  if (value === "trends" || value.startsWith("trends/")) return "trends";
   return ["discover", "following", "saved", "library"].includes(value)
     ? (value as Page)
     : "briefing";
@@ -322,4 +323,169 @@ export function mergeCandidates(view: View | null, story: Story, limit = 30) {
   return newestFirst(
     (view?.events || []).filter((e) => e.id !== story.id && e.topic === story.topic),
   ).slice(0, limit);
+}
+
+/* ---------- lenses: company moves, open source and community, research, policy ---------- */
+
+export type Lens = "company" | "community" | "research" | "policy";
+export const lensLabel: Record<Lens, string> = {
+  company: "公司动向",
+  community: "开源与社区",
+  research: "研究",
+  policy: "政策与产业",
+};
+export type Trend = { lens: Lens; company: string; product: string };
+
+/** `#trends/<lens>/<company>/<product>`; missing parts are empty (the page picks defaults). */
+export function trendFromHash(hash: string): Trend {
+  const parts = hash.replace(/^#/, "").split("/").map((p) => decodeURIComponent(p));
+  const lens = (Object.keys(lensLabel) as Lens[]).includes(parts[1] as Lens)
+    ? (parts[1] as Lens)
+    : "company";
+  return { lens, company: parts[2] || "", product: parts[3] || "" };
+}
+
+export function trendHash({ lens, company, product }: Trend) {
+  return ["trends", lens, company, product]
+    .filter(Boolean)
+    .map((p) => encodeURIComponent(p))
+    .join("/");
+}
+
+const readable = (s: Story) => s.qualified && !s.dismissed;
+
+/** A release, correction or withdrawal, or anything urgent: a large node on a line. */
+export const isMajor = (s: Story) =>
+  !!s.protected || ["release", "correction", "withdrawal"].includes(s.action);
+
+/** What one company did (it is the actor), optionally one product group, newest first. */
+export function companyLine(events: Story[], company: string, product = "") {
+  return newestFirst(
+    events.filter(
+      (s) =>
+        readable(s) &&
+        s.companies?.some((c) => c.id === company && (!product || c.products.includes(product))),
+    ),
+    true,
+  );
+}
+
+/** Reports that only mention the company (a customer, a lawsuit, someone else's test). */
+export function companyMentions(events: Story[], company: string) {
+  return newestFirst(
+    events.filter((s) => readable(s) && s.mentions?.includes(company)),
+    true,
+  );
+}
+
+/** Stories under one lens, newest first. */
+export function lensStories(events: Story[], lens: Lens) {
+  return newestFirst(
+    events.filter((s) => readable(s) && s.lenses?.includes(lens)),
+    true,
+  );
+}
+
+/** How many moves each company and each of its product groups has. */
+export function lineCounts(events: Story[], company = "") {
+  const companies: Record<string, number> = {};
+  const products: Record<string, number> = {};
+  for (const s of events) {
+    if (!readable(s)) continue;
+    for (const c of s.companies || []) {
+      companies[c.id] = (companies[c.id] || 0) + 1;
+      if (c.id === company) for (const p of c.products) products[p] = (products[p] || 0) + 1;
+    }
+  }
+  return { companies, products };
+}
+
+/** "11月24日" in the display timezone; lines group their nodes by this day. */
+export function dayLabel(value?: string | null, capturedAt?: string) {
+  const at = Date.parse(value ?? "") || Date.parse(capturedAt ?? "");
+  if (!Number.isFinite(at)) return "日期未确认";
+  const d = zoned(at);
+  return `${d.month}月${d.day}日`;
+}
+
+/* ---------- one story's evidence, stage by stage ---------- */
+
+export type Stage = "statement" | "test" | "change" | "coverage";
+export const stageLabel: Record<Stage, string> = {
+  statement: "发布方陈述",
+  test: "测试",
+  change: "更正与更新",
+  coverage: "其他报道",
+};
+
+const party = (role?: string) => role === "official" || role === "research";
+
+/** Who reported a test, never called independent (an article may relay the vendor's numbers). */
+function tester(entry: Story["timeline"][number]) {
+  if (entry.content_kind === "benchmark_snapshot") return "公开榜单数据";
+  return entry.role === "official"
+    ? "厂商自测"
+    : entry.role === "research"
+      ? "论文自报结果"
+      : entry.role === "community"
+        ? "社区报告的测试"
+        : "媒体或作者报告的测试";
+}
+
+/** Each report as a node: its stage, a label for who/what it is and its day since the first
+ * report (D0, D1 …), oldest first. Gaps name missing key stages ("尚未见他方测试"); they speak
+ * only of the reports collected here. */
+export function evidenceStages(story: Story) {
+  const at = (t: Story["timeline"][number]) =>
+    Date.parse(t.published_at ?? "") || Date.parse(t.captured_at ?? "") || NaN;
+  const entries = [...story.timeline].sort((a, b) => (at(a) || 0) - (at(b) || 0));
+  const start = entries.map(at).find(Number.isFinite);
+  const nodes = entries.map((entry, index) => {
+    const stage: Stage =
+      entry.action === "correction" || entry.action === "withdrawal" || (entry.action === "update" && index > 0)
+        ? "change"
+        : entry.evidence === "reported_test" || entry.action === "test" || entry.content_kind === "benchmark_snapshot"
+          ? "test"
+          : party(entry.role)
+            ? "statement"
+            : "coverage";
+    const label =
+      stage === "statement"
+        ? entry.role === "research"
+          ? "论文原文"
+          : "官方原文"
+        : stage === "test"
+          ? tester(entry)
+          : stage === "change"
+            ? actionLabel[entry.action] || "更新"
+            : evidence(entry.evidence, entry.role, entry.content_kind);
+    const time = at(entry);
+    const day =
+      start !== undefined && Number.isFinite(time) ? Math.floor((time - start) / 86400000) : null;
+    return { entry, stage, label, day };
+  });
+  const gaps: string[] = [];
+  if (!nodes.some((n) => party(n.entry.role)) && story.content_kind !== "benchmark_snapshot")
+    gaps.push("未见官方或论文原文");
+  if (
+    ["release", "update", "test"].includes(story.action) &&
+    !nodes.some((n) => n.stage === "test" && !party(n.entry.role))
+  )
+    gaps.push("尚未见他方测试");
+  return { nodes, gaps };
+}
+
+/** Itemised evidence instead of a single strength score: each item is present or not. */
+export function evidenceChecklist(story: Story) {
+  const { nodes } = evidenceStages(story);
+  const tests = nodes.filter((n) => n.stage === "test");
+  return [
+    { label: "官方或论文原文", ok: nodes.some((n) => party(n.entry.role)) },
+    { label: "发布方自测", ok: tests.some((n) => party(n.entry.role)) },
+    { label: "他方报告的测试", ok: tests.some((n) => !party(n.entry.role)) },
+    {
+      label: "更正或撤回",
+      ok: nodes.some((n) => ["correction", "withdrawal"].includes(n.entry.action)),
+    },
+  ];
 }

@@ -14,6 +14,7 @@ from .discover import discover
 from .engine import active_actions, frame_key, occurrences, project, stamp, text_key
 from .events import assign, frame_of, resolve
 from .intent import IntentEngine, recall_candidates
+from .lenses import Lenses
 from .models import (
     POLICY_EPOCH,
     TIMEZONES,
@@ -69,6 +70,10 @@ class ContentService:
         self.sources = json.loads((settings.root / "data/briefing_sources.json").read_text("utf-8"))["sources"]
         # Sources whose reports arrive late by nature (curated paper lists) get a longer window.
         self.late_hours = {s["id"]: s["late_hours"] for s in self.sources if "late_hours" in s}
+        # Company lines and the other lenses: the owner's editable table of companies and products.
+        table = settings.root / "data/companies.json"
+        self.lenses = Lenses(json.loads(table.read_text("utf-8"))["companies"] if table.exists() else [],
+                             self.sources)
         self.analyzer = Analyzer(store, settings,
                                  requests_per_day=getattr(settings, "reader_requests_per_day", None),
                                  tokens_per_day=getattr(settings, "reader_tokens_per_day", None))
@@ -108,6 +113,9 @@ class ContentService:
                              interactions, membership=membership, **bounds)
         value["last_refresh"] = latest
         value["saved_events"] = [e for e in saved_view["events"] if e["saved"]]
+        for event in [*value["events"], *value["saved_events"]]:
+            self.lenses.tag(event)
+        value["companies"] = self.lenses.catalog()
         follows = self.store.follows(user)
         assessments = {f["plan_hash"]: self.store.intent_assessments(f["plan_hash"])
                        for f in follows if f.get("intent_plan")}

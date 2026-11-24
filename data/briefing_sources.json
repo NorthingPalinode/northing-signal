@@ -698,6 +698,135 @@
       "max_items": 6,
       "description": "仅接入 Qwen 公开模型元数据，正文仍待补充；与 HF 上同一模型不构成独立证据。",
       "original_url": "https://modelscope.cn/models"
+    },
+    {
+      "id": "google-ai",
+      "name": "Google · AI 官方博客",
+      "role": "official",
+      "url": "https://blog.google/technology/ai/rss/",
+      "hosts": [
+        "blog.google"
+      ],
+      "kind": "rss",
+      "priority": 0,
+      "description": "Google 官方博客 The Keyword 的 AI 频道：Gemini 应用、模型与产品发布。"
+    },
+    {
+      "id": "microsoft-news",
+      "name": "Microsoft · 新闻中心",
+      "role": "official",
+      "url": "https://news.microsoft.com/source/feed/",
+      "hosts": [
+        "news.microsoft.com"
+      ],
+      "kind": "rss",
+      "priority": 0,
+      "require": "(?i)\\b(AI|LLMs?|agents?|agentic|Copilot|MAI|Foundry|machine learning|artificial intelligence|models?)\\b",
+      "description": "Microsoft 官方新闻中心，含 Microsoft AI（MAI）模型与 Copilot 发布；只保留与 AI 相关的条目。"
+    },
+    {
+      "id": "azure-blog",
+      "name": "Microsoft Azure · 官方博客",
+      "role": "official",
+      "url": "https://azure.microsoft.com/en-us/blog/feed/",
+      "hosts": [
+        "azure.microsoft.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "require": "(?i)\\b(AI|LLMs?|agents?|agentic|Copilot|Foundry|OpenAI|machine learning|models?|GPUs?)\\b",
+      "description": "Azure 与 Microsoft Foundry 的产品公告；只保留与 AI 相关的条目。"
+    },
+    {
+      "id": "apple-ml",
+      "name": "Apple · 机器学习研究",
+      "role": "research",
+      "url": "https://machinelearning.apple.com/rss.xml",
+      "hosts": [
+        "machinelearning.apple.com"
+      ],
+      "kind": "rss",
+      "priority": 1
+    },
+    {
+      "id": "apple-newsroom",
+      "name": "Apple · 新闻室",
+      "role": "official",
+      "url": "https://www.apple.com/newsroom/rss-feed.rss",
+      "hosts": [
+        "www.apple.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "require": "(?i)\\b(AI|Apple Intelligence|Siri|machine learning|artificial intelligence|models?)\\b",
+      "description": "Apple 官方新闻室；只保留与 AI 相关的条目（Apple Intelligence、Siri 等）。"
+    },
+    {
+      "id": "amazon-news",
+      "name": "Amazon · 官方新闻",
+      "role": "official",
+      "url": "https://www.aboutamazon.com/news/rss",
+      "hosts": [
+        "www.aboutamazon.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "require": "(?i)\\b(AI|Alexa\\+?|Nova|Bedrock|Trainium|agents?|agentic|machine learning|artificial intelligence|models?)\\b",
+      "description": "About Amazon 官方新闻，含 AWS、Alexa 与收购；只保留与 AI 相关的条目。"
+    },
+    {
+      "id": "aws-ml",
+      "name": "AWS · 机器学习博客",
+      "role": "official",
+      "url": "https://aws.amazon.com/blogs/machine-learning/feed/",
+      "hosts": [
+        "aws.amazon.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "description": "Amazon Bedrock、SageMaker 等产品公告，也有大量使用教程。"
+    },
+    {
+      "id": "nvidia-newsroom",
+      "name": "NVIDIA · 新闻稿",
+      "role": "official",
+      "url": "https://nvidianews.nvidia.com/releases.xml",
+      "hosts": [
+        "nvidianews.nvidia.com"
+      ],
+      "kind": "rss",
+      "priority": 0,
+      "description": "NVIDIA 官方新闻稿：产品、合作与公司公告。"
+    },
+    {
+      "id": "alibaba-model-studio",
+      "name": "阿里云百炼 · 模型发布与更新",
+      "role": "official",
+      "url": "https://www.alibabacloud.com/help/en/model-studio/newly-released-models",
+      "hosts": [
+        "www.alibabacloud.com"
+      ],
+      "kind": "updates",
+      "block": "rkb-update",
+      "priority": 0,
+      "max_items": 6,
+      "max_bytes": 3000000,
+      "description": "阿里云百炼（Model Studio）官方更新记录，按日期拆分；含 Qwen 与平台上架的第三方模型。Qwen 官网为动态页面，尚无稳定文章入口。"
+    },
+    {
+      "id": "zhipu-releases",
+      "name": "智谱 · 模型与产品发布记录",
+      "role": "official",
+      "url": "https://docs.bigmodel.cn/cn/update/new-releases",
+      "hosts": [
+        "docs.bigmodel.cn"
+      ],
+      "kind": "updates",
+      "priority": 0,
+      "max_items": 6,
+      "description": "智谱开放平台官方发布记录，按发布日期拆分。Z.ai 新闻页尚无可用入口。"
     }
   ]
 }

@@ -1,0 +1,133 @@
+{
+  "note": "公司动向的公司与产品别名表，所有者可直接编辑。aliases：公司名；英文按大小写与整词匹配（GPT- 这类以连字符结尾的只看开头），中文按字面匹配。sources：该公司的官方来源 id（data/briefing_sources.json）。products：按读者视角分组，一条进展可属于多个产品；一个名字是另一个更长名字的一部分时（Claude 与 Claude Code），只算更长的那个。研究类内容另归「研究与安全」，产业类内容另归「公司与政策」。",
+  "companies": [
+    {
+      "id": "openai", "name": "OpenAI", "aliases": ["OpenAI"], "sources": ["openai"],
+      "products": [
+        {"id": "chatgpt", "name": "ChatGPT（含 Codex）", "aliases": ["ChatGPT", "Codex"]},
+        {"id": "api", "name": "API 与模型", "aliases": ["OpenAI API", "Responses API", "Realtime API", "Agents SDK", "GPT-", "gpt-", "o3", "o4"]},
+        {"id": "sora", "name": "Sora", "aliases": ["Sora"]}
+      ]
+    },
+    {
+      "id": "anthropic", "name": "Anthropic", "aliases": ["Anthropic"], "sources": ["anthropic-news", "claude-code-release"],
+      "products": [
+        {"id": "claude", "name": "Claude（应用与模型）", "aliases": ["Claude"]},
+        {"id": "claude-code", "name": "Claude Code", "aliases": ["Claude Code"]},
+        {"id": "api", "name": "Claude API 与开发者平台", "aliases": ["Claude API", "Claude Developer Platform", "Agent SDK", "MCP", "Model Context Protocol"]}
+      ]
+    },
+    {
+      "id": "google", "name": "Google", "aliases": ["Google", "DeepMind", "Alphabet", "谷歌"], "sources": ["google-ai", "deepmind", "google-research"],
+      "products": [
+        {"id": "gemini", "name": "Gemini（应用与模型）", "aliases": ["Gemini", "Gemma", "Veo", "Imagen", "Nano Banana", "Genie"]},
+        {"id": "developers", "name": "开发者平台", "aliases": ["Gemini API", "AI Studio", "Vertex AI", "Antigravity", "Jules", "Gemini CLI"]},
+        {"id": "search", "name": "搜索与 Workspace", "aliases": ["Google Search", "AI Mode", "AI Overviews", "Workspace", "Gmail", "Chrome", "Android"]}
+      ]
+    },
+    {
+      "id": "microsoft", "name": "Microsoft", "aliases": ["Microsoft", "微软"], "sources": ["microsoft-news", "azure-blog", "microsoft-research"],
+      "products": [
+        {"id": "copilot", "name": "Copilot", "aliases": ["Copilot", "GitHub Copilot", "Microsoft 365 Copilot"]},
+        {"id": "azure", "name": "Azure 与 Foundry", "aliases": ["Azure", "Foundry", "Microsoft Foundry"]},
+        {"id": "mai", "name": "Microsoft AI 模型", "aliases": ["MAI", "Microsoft AI"]},
+        {"id": "windows", "name": "Windows", "aliases": ["Windows"]}
+      ]
+    },
+    {
+      "id": "nvidia", "name": "NVIDIA", "aliases": ["NVIDIA", "Nvidia", "英伟达"], "sources": ["nvidia", "nvidia-newsroom"],
+      "products": [
+        {"id": "hardware", "name": "芯片与系统", "aliases": ["Blackwell", "Rubin", "Vera", "DGX", "GB200", "GB300", "H100", "H200", "B200", "B300", "GPU", "GPUs", "NVLink"]},
+        {"id": "software", "name": "软件与模型", "aliases": ["CUDA", "NIM", "Nemotron", "Omniverse", "Cosmos", "Isaac", "Dynamo", "TensorRT"]}
+      ]
+    },
+    {
+      "id": "meta", "name": "Meta", "aliases": ["Meta"], "sources": ["meta-news", "hf-meta"],
+      "products": [
+        {"id": "llama", "name": "Llama", "aliases": ["Llama"]},
+        {"id": "meta-ai", "name": "Meta AI 应用", "aliases": ["Meta AI"]}
+      ]
+    },
+    {
+      "id": "xai", "name": "xAI", "aliases": ["xAI"], "sources": ["xai-news"],
+      "products": [
+        {"id": "grok", "name": "Grok", "aliases": ["Grok"]}
+      ]
+    },
+    {
+      "id": "apple", "name": "Apple", "aliases": ["Apple", "苹果"], "sources": ["apple-ml", "apple-newsroom"],
+      "products": [
+        {"id": "apple-intelligence", "name": "Apple Intelligence 与 Siri", "aliases": ["Apple Intelligence", "Siri"]}
+      ]
+    },
+    {
+      "id": "amazon", "name": "Amazon", "aliases": ["Amazon", "AWS", "亚马逊"], "sources": ["amazon-news", "aws-ml"],
+      "products": [
+        {"id": "bedrock", "name": "Bedrock 与 AWS AI 服务", "aliases": ["Bedrock", "Amazon Bedrock", "SageMaker", "AWS Quick", "Kiro"]},
+        {"id": "nova", "name": "Nova 模型", "aliases": ["Amazon Nova", "Nova"]},
+        {"id": "alexa", "name": "Alexa", "aliases": ["Alexa", "Alexa+"]},
+        {"id": "chips", "name": "芯片", "aliases": ["Trainium", "Inferentia"]}
+      ]
+    },
+    {
+      "id": "deepseek", "name": "DeepSeek", "aliases": ["DeepSeek", "深度求索"], "sources": ["deepseek-updates", "hf-deepseek"],
+      "products": []
+    },
+    {
+      "id": "alibaba", "name": "阿里巴巴（Qwen）", "aliases": ["Alibaba", "阿里巴巴", "阿里云", "阿里", "Qwen", "通义", "千问"], "sources": ["alibaba-model-studio", "hf-qwen", "modelscope-qwen"],
+      "products": [
+        {"id": "qwen", "name": "Qwen 模型与应用", "aliases": ["Qwen", "qwen", "通义", "千问"]},
+        {"id": "model-studio", "name": "阿里云百炼", "aliases": ["Model Studio", "百炼"]}
+      ]
+    },
+    {
+      "id": "bytedance", "name": "字节跳动", "aliases": ["ByteDance", "字节跳动", "字节"], "sources": ["seed-news", "hf-seed"],
+      "products": [
+        {"id": "seed", "name": "Seed 模型与研究", "aliases": ["Seed"]},
+        {"id": "doubao", "name": "豆包", "aliases": ["Doubao", "豆包"]},
+        {"id": "trae", "name": "Trae", "aliases": ["Trae"]}
+      ]
+    },
+    {
+      "id": "moonshot", "name": "月之暗面（Kimi）", "aliases": ["Moonshot", "月之暗面", "Kimi"], "sources": ["kimi-updates", "hf-kimi", "kimi-code-release"],
+      "products": [
+        {"id": "kimi", "name": "Kimi 模型与应用", "aliases": ["Kimi"]},
+        {"id": "kimi-code", "name": "Kimi Code", "aliases": ["Kimi Code"]}
+      ]
+    },
+    {
+      "id": "zhipu", "name": "智谱", "aliases": ["智谱", "Zhipu", "Z.ai", "GLM"], "sources": ["zhipu-releases", "hf-glm"],
+      "products": []
+    },
+    {
+      "id": "minimax", "name": "MiniMax", "aliases": ["MiniMax", "稀宇"], "sources": ["minimax-news", "hf-minimax"],
+      "products": [
+        {"id": "hailuo", "name": "海螺", "aliases": ["Hailuo", "海螺"]}
+      ]
+    },
+    {
+      "id": "mistral", "name": "Mistral", "aliases": ["Mistral"], "sources": ["mistral-news", "hf-mistral"],
+      "products": [
+        {"id": "le-chat", "name": "Le Chat", "aliases": ["Le Chat"]}
+      ]
+    },
+    {
+      "id": "baidu", "name": "百度", "aliases": ["Baidu", "百度"], "sources": [],
+      "products": [
+        {"id": "ernie", "name": "文心", "aliases": ["ERNIE", "文心"]}
+      ]
+    },
+    {
+      "id": "ant", "name": "蚂蚁集团", "aliases": ["Ant Group", "蚂蚁集团", "蚂蚁", "inclusionAI"], "sources": [],
+      "products": [
+        {"id": "ling", "name": "百灵与灵波模型", "aliases": ["百灵", "灵波", "Ling-", "Ring-"]}
+      ]
+    },
+    {
+      "id": "tencent", "name": "腾讯", "aliases": ["Tencent", "腾讯"], "sources": ["hf-tencent"],
+      "products": [
+        {"id": "hunyuan", "name": "混元", "aliases": ["Hunyuan", "混元"]}
+      ]
+    }
+  ]
+}

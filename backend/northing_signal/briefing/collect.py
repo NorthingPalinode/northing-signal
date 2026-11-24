@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import weakref
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -126,6 +127,11 @@ def parse(source, body, limit):
     else:
         from .source_adapters import parse_index
         return parse_index(source, body, limit)
+    if source.get("require"):
+        # A company's general newsroom (Apple, Amazon): keep only entries about AI, so sports
+        # streaming or retail news never takes a place in the model's judging budget.
+        wanted = re.compile(source["require"])
+        entries = [e for e in entries if wanted.search(f"{e.get('title') or ''} {e.get('summary') or ''}")]
     output = []
     seen = set()
     for entry in entries:
