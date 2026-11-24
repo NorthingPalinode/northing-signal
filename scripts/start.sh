@@ -5,4 +5,4 @@ if [ ! -x .venv/bin/python ]; then python3 -m venv .venv; fi
 .venv/bin/python -m pip install -r requirements.lock
 .venv/bin/python -m pip install --no-deps -e .
 (cd frontend && npm ci --no-audit --no-fund && npm run build)
-exec .venv/bin/python -m uvicorn northing_signal.briefing.app:create_app --factory --host 127.0.0.1 --port "${PORT:-8000}"
+exec .venv/bin/python -m uvicorn northing_signal.briefing.app:create_app --factory --host 127.0.0.1 --port "${PORT:-8000}" --proxy-headers --forwarded-allow-ips "127.0.0.1,::1"
