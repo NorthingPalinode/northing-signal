@@ -16,6 +16,7 @@ from .events import assign, frame_of, resolve
 from .intent import IntentEngine, recall_candidates
 from .models import (
     POLICY_EPOCH,
+    TIMEZONES,
     Interaction,
     Preferences,
     RefreshRequest,
@@ -145,6 +146,9 @@ class ContentService:
         _, upcoming = refresh_slots(datetime.now(timezone.utc), self.zone())
         value["schedule"] = {"enabled": value["preferences"]["auto_refresh"], "hours": list(REFRESH_HOURS),
                              "next": upcoming.astimezone(timezone.utc).isoformat()}
+        site = getattr(self.settings, "reader_timezone", "")
+        value["timezone"] = {"zone": self.reader_zone_name(user), "site": site,
+                             "options": [{"id": key, "label": label} for key, label in TIMEZONES.items()]}
         return value
 
     def thresholds(self):
@@ -152,7 +156,21 @@ class ContentService:
                 "other": getattr(self.settings, "reader_threshold_other", 9)}
 
     def zone(self):
+        """The site timezone: update schedule, budgets, quotas and public digest dates."""
         name = getattr(self.settings, "reader_timezone", "")
+        return ZoneInfo(name) if name else None
+
+    def publish_zone(self):
+        """The public digest's timezone (Beijing by default); empty follows the site."""
+        name = getattr(self.settings, "reader_publish_timezone", "")
+        return ZoneInfo(name) if name else self.zone()
+
+    def reader_zone_name(self, user=LOCAL_USER):
+        """The reader's own timezone for what they see; empty means the system timezone."""
+        return self.store.preferences(user).timezone or getattr(self.settings, "reader_timezone", "")
+
+    def reader_zone(self, user=LOCAL_USER):
+        name = self.reader_zone_name(user)
         return ZoneInfo(name) if name else None
 
     def refresh_due(self, clock=None):
@@ -171,7 +189,7 @@ class ContentService:
         return self.start(RefreshRequest(), manual=False)
 
     def weekly_report(self, kind="recent", user=LOCAL_USER):
-        zone = self.zone()
+        zone = self.reader_zone(user)
         clock = datetime.now(timezone.utc)
         start, end = report_range(kind, clock, zone)
         value = self.projection(user)
@@ -186,7 +204,7 @@ class ContentService:
         if target is None:
             raise ValueError("未设置公开日报目录（READER_PUBLISH_DIR 或 --out）")
         events = self.neutral_events()
-        return publish(events, target, clock=clock, zone=self.zone(),
+        return publish(events, target, clock=clock, zone=self.publish_zone(),
                        base_url=getattr(self.settings, "reader_public_url", ""))
 
     def assign_events(self):

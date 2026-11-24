@@ -22,8 +22,10 @@ class ReaderSettings(BaseSettings):
     llm_thinking: Literal["provider_default", "enabled", "disabled"] = "provider_default"
     reader_requests_per_day: int | None = Field(default=None, ge=0)
     reader_tokens_per_day: int | None = Field(default=None, ge=0)
-    # IANA name such as Asia/Shanghai; empty uses the system timezone. Sets when the daily budget resets.
-    reader_timezone: str = ""
+    # Site timezone (IANA name, e.g. America/New_York or Asia/Shanghai): the 00:00/12:00 update
+    # schedule, when daily budgets and quotas reset, public digest dates, and the default for readers
+    # who have not picked their own. Empty uses the system timezone.
+    reader_timezone: str = "America/New_York"
     reader_batch_size: int = Field(default=4, ge=1, le=6)
     reader_follow_analyze_limit: int = Field(default=6, ge=1, le=24)
     reader_model_concurrency: int = Field(default=1, ge=1, le=4)
@@ -54,6 +56,9 @@ class ReaderSettings(BaseSettings):
     reader_publish_dir: str = ""
     # Address the published site is served from, e.g. https://you.github.io/daily/ (RSS links).
     reader_public_url: str = ""
+    # Timezone of the public digest's edition names and dates. Beijing by default: the digest is
+    # written in Chinese while the site may run on New York time. Empty follows READER_TIMEZONE.
+    reader_publish_timezone: str = "Asia/Shanghai"
 
     def publish_path(self, value=None):
         value = value or self.reader_publish_dir
@@ -62,7 +67,7 @@ class ReaderSettings(BaseSettings):
         path = Path(value).expanduser()
         return path if path.is_absolute() else self.root / path
 
-    @field_validator("reader_timezone")
+    @field_validator("reader_timezone", "reader_publish_timezone")
     @classmethod
     def known_timezone(cls, value):
         if value:

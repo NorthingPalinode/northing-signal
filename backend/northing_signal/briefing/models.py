@@ -15,6 +15,10 @@ TOPICS = {
     "models": "模型与多模态", "agents": "Agent 与开发", "research": "研究与评测",
     "engineering": "部署与成本", "products": "产品与应用", "industry": "产业与政策",
 }
+# Timezones a reader can pick for the dates they see, "today" and weekly ranges (2026-11-24).
+# The site default is READER_TIMEZONE (New York unless set); add a zone here to offer it.
+TIMEZONES = {"America/New_York": "纽约时间", "Asia/Shanghai": "北京时间"}
+DEFAULT_TIMEZONE = "America/New_York"
 POLICY = "content-v1"
 # Raise only when a change should invalidate earlier judgments (e.g. new scoring rules).
 # Rewording the prompt alone keeps them; older epochs stay visible, marked, until re-judged.
@@ -128,6 +132,15 @@ class Preferences(Contract):
     exploration: bool = True
     # Update the briefing at 00:00 and 12:00 (reader timezone) while the service runs.
     auto_refresh: bool = True
+    # Shown dates and weekly ranges; empty follows the site timezone (READER_TIMEZONE).
+    timezone: str = ""
+
+    @field_validator("timezone")
+    @classmethod
+    def offered_timezone(cls, value):
+        if value and value not in TIMEZONES:
+            raise ValueError("可选时区：" + "、".join(f"{label}（{key}）" for key, label in TIMEZONES.items()))
+        return value
 
     @field_validator("topics")
     @classmethod

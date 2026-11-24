@@ -24,8 +24,18 @@ def add(store, item, **judged):
 
 def make(tmp_path, **changes):
     store = Store(tmp_path / "reader.db")
-    service = ContentService(store, settings(reader_timezone="Asia/Shanghai", **changes))
+    service = ContentService(store, settings(**{"reader_timezone": "Asia/Shanghai", **changes}))
     return store, service
+
+
+def test_the_digest_keeps_beijing_dates_on_a_new_york_site(tmp_path):
+    """2026-11-24: the site runs on New York time; the Chinese digest is dated in Beijing time."""
+    for publish_zone, expected in [("Asia/Shanghai", "2026-11-02-0800"), ("", "2026-11-01-1900")]:
+        (tmp_path / expected).mkdir()
+        store, service = make(tmp_path / expected, reader_timezone="America/New_York",
+                              reader_publish_timezone=publish_zone)
+        add(store, material())
+        assert service.publish_digest(tmp_path / "out" / expected, clock=at(2, 0))["edition"] == expected
 
 
 def test_reader_actions_never_reach_the_public_digest(tmp_path):

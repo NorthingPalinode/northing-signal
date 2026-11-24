@@ -15,6 +15,8 @@ export type Prefs = {
   exploration: boolean;
   /** Update at 00:00 and 12:00 while the service runs. */
   auto_refresh: boolean;
+  /** IANA timezone for shown dates; empty follows the site timezone. */
+  timezone?: string;
 };
 export type Claim = { statement: string; quote: string; kind: string };
 export type Action = { request_id: string; kind: string; at: string; version: string };
@@ -173,6 +175,8 @@ export type View = {
   as_of: string;
   last_refresh?: Refresh | null;
   schedule?: { enabled: boolean; hours: number[]; next: string };
+  /** zone: what this reader sees dates in; site: schedule, quotas and digest dates. */
+  timezone?: { zone: string; site: string; options: { id: string; label: string }[] };
   last_visit?: string | null;
   events: Story[];
   focus: string[];

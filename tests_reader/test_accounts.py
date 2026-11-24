@@ -218,3 +218,24 @@ def test_operators_may_choose_tokens_but_never_share_one(tmp_path):
     # Claiming again with the same chosen token is a no-op, not a conflict.
     assert store.create_user("admin", claim=LOCAL_USER, token="rootGiotto")[1] == "rootGiotto"
     assert store.user_by_token("") is None and store.user_by_token("nobody") is None
+
+
+def test_site_defaults_to_new_york_and_each_reader_may_switch_to_beijing(tmp_path):
+    """2026-11-24: the owner is in the US with business in China."""
+    from northing_signal.briefing.settings import ReaderSettings
+    assert ReaderSettings.model_fields["reader_timezone"].default == "America/New_York"
+    app, store = app_with_story(tmp_path, reader_timezone="America/New_York")
+    (_, a), (_, b) = store.create_user(), store.create_user()
+    with TestClient(app) as client:
+        zone = client.get("/api/reader", headers=as_(a)).json()["timezone"]
+        assert zone["zone"] == zone["site"] == "America/New_York"
+        assert [o["id"] for o in zone["options"]] == ["America/New_York", "Asia/Shanghai"]
+        prefs = client.get("/api/reader", headers=as_(a)).json()["preferences"]
+        saved = client.put("/api/reader/preferences", json={**prefs, "timezone": "Asia/Shanghai"}, headers=as_(a))
+        assert saved.status_code == 200 and saved.json()["timezone"]["zone"] == "Asia/Shanghai"
+        # Only this reader's view changes; the site schedule stays on New York time.
+        other = client.get("/api/reader", headers=as_(b)).json()
+        assert other["timezone"]["zone"] == "America/New_York"
+        assert other["schedule"]["next"] == saved.json()["schedule"]["next"]
+        refused = client.put("/api/reader/preferences", json={**prefs, "timezone": "Mars/Olympus"}, headers=as_(a))
+        assert refused.status_code == 422

@@ -17,9 +17,12 @@ import {
   pageFromHash,
   queueLabel,
   sections,
+  setDisplayZone,
+  siteZoneLabel,
   statusLabel,
   snapshotLabel,
   storyFromHash,
+  todayLabel,
   topThree,
   topics,
   updateLine,
@@ -79,13 +82,6 @@ const backLabel: Record<Page, string> = {
   story: "简报",
 };
 const dismissKinds = ["irrelevant", "thin", "duplicate"];
-
-const today = () =>
-  new Intl.DateTimeFormat("zh-CN", {
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  }).format(new Date());
 
 /** Sends a one-off "shown" interaction the first time a story is on screen. */
 function useExposure(
@@ -436,6 +432,9 @@ export default function ReaderApp() {
   );
   const fail = useCallback((e: unknown) => setError((e as Error).message), []);
   const isAdmin = view?.account ? view.account.role === "admin" : true;
+  // Dates follow the reader's chosen timezone; a past briefing keeps the current one.
+  if (view?.timezone) setDisplayZone(view.timezone.zone);
+  const siteZone = siteZoneLabel(view);
 
   const load = useCallback(async () => {
     const result = await request<View>("");
@@ -1805,7 +1804,7 @@ export default function ReaderApp() {
       return (
         <>
           <section className="r-card">
-            <h2 className="r-card-title">{historical ? "过去的简报" : today()}</h2>
+            <h2 className="r-card-title">{historical ? "过去的简报" : todayLabel()}</h2>
             <div className="r-kpis">
               <div>
                 <strong>{view.counts.eligible}</strong>
@@ -1929,7 +1928,7 @@ export default function ReaderApp() {
           // The date sits in the rail card on wide screens; phones need the update times more.
           view ? `${view.counts.eligible} 项进展` : "",
           !historical && newCount ? `新增 ${newCount} 项` : "",
-          !historical ? updateLine(view) : today(),
+          !historical ? updateLine(view) : todayLabel(),
         ]
           .filter(Boolean)
           .join(" · ")
@@ -2382,6 +2381,30 @@ export default function ReaderApp() {
                 void savePrefs();
               }}
             >
+              {view?.timezone && (
+                <fieldset>
+                  <legend>时区</legend>
+                  <div className="r-segment">
+                    {view.timezone.options.map(({ id, label }) => {
+                      const current = (prefs.timezone || view.timezone?.site) === id;
+                      return (
+                        <button
+                          type="button"
+                          key={id}
+                          className={current ? "active" : ""}
+                          aria-pressed={current}
+                          onClick={() => setPrefs({ ...prefs, timezone: id })}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="r-muted">
+                    页面上的日期、时间和周报起止日按这里显示。自动更新时间和每日额度按站点的{siteZone}计算。
+                  </p>
+                </fieldset>
+              )}
               <fieldset>
                 <legend>想多看哪些方向</legend>
                 <div className="r-toggle-grid">
@@ -2456,7 +2479,7 @@ export default function ReaderApp() {
                   onChange={(e) => setPrefs({ ...prefs, auto_refresh: e.target.checked })}
                 />
                 <span>
-                  <strong>每天 0 点和 12 点自动更新</strong>
+                  <strong>每天{siteZone ? ` ${siteZone} ` : " "}0 点和 12 点自动更新</strong>
                   <small>
                     仅在本机服务运行期间；错过的时间点会在下次启动后补一次。每次更新会调用你配置的模型。
                   </small>
