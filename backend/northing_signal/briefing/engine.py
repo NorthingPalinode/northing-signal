@@ -44,6 +44,27 @@ def text_key(material):
     return digest(original) if len(original) >= 120 else None
 
 
+# A roundup lists several stories under one headline (2026-11-24: GeekPark's and Leiphone's morning
+# briefs led and named the Jensen Huang event, and stood in focus as a second copy of it).
+ROUNDUP_MARKERS = re.compile(r"早报|晚报|周报|周刊|早知道|newsletter|roundup|\[ainews\]|this week in", re.I)
+
+
+def is_roundup(material):
+    """Several stories in one title (parts joined by semicolons) or a named digest."""
+    title = material.title or ""
+    parts = [part for part in re.split(r"[；;]", title) if len(part.strip()) >= 6]
+    return len(parts) >= 2 or bool(ROUNDUP_MARKERS.search(title))
+
+
+URGENT = {"correction", "withdrawal"}
+
+
+def urgent(assessment):
+    """A correction or withdrawal that matters enough to stand above everything. A minor tool's
+    bug-fix release once read as a correction and led the briefing (llm-gemini 0.38.1, 2026-11-24)."""
+    return assessment.action in URGENT and assessment.significance >= 2
+
+
 def occurrences(materials, judgments, *, as_of=None):
     """(material, assessment) for materials the projection puts into events, in its order."""
     clock = stamp(as_of) if as_of else datetime.now(timezone.utc)
@@ -178,18 +199,21 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
     for event_id, members in groups.items():
         def priority(member):
             material, a, _ = member
-            urgent = a.action in {"correction", "withdrawal"}
+            pressing = urgent(a)
             date = stamp(material.published_at) or stamp(material.captured_at)
             usable = bool(a.claims) and a.evidence != "insufficient"
-            worth = a.significance * 3 + a.novelty * 2 + a.usefulness >= 9 or urgent
-            return (usable and worth, urgent, a.action in {"test", "update"},
+            worth = a.significance * 3 + a.novelty * 2 + a.usefulness >= 9 or pressing
+            # A single report leads (and names) the event before any roundup that mentions it.
+            return (not is_roundup(material), usable and worth, pressing, a.action in {"test", "update"},
                     material.source_role in {"official", "research"},
                     a.significance * 3 + a.novelty * 2 + a.usefulness, date)
         material, a, row = max(members, key=priority)
         value = a.significance * 3 + a.novelty * 2 + a.usefulness
         minimum = thresholds.get(threshold_group(material.source_role), SELECT_THRESHOLD)
         qualified = (bool(a.claims) and a.evidence != "insufficient"
-                     and (value >= minimum or a.action in {"correction", "withdrawal"}))
+                     and (value >= minimum or urgent(a)))
+        # Only roundups report it: it may fill the radar, never focus (often a copy of a lead story).
+        roundup = all(is_roundup(m) for m, _, _ in members)
         # Collection time says when we saw it, not when it happened: an undated model card or
         # changelog may describe something months old (Kimi K3, 2026-11-23). Without any
         # publication date among the reports the event earns no recency and stays out of focus.
@@ -211,7 +235,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         first_captured = min(m.captured_at for m, _, _ in members)
         latest_captured = max(m.captured_at for m, _, _ in members)
         dismissed = any(r["kind"] in {"irrelevant", "thin", "duplicate"} for r in recent_actions)
-        protected = a.action in {"correction", "withdrawal"} and not known_earlier
+        protected = urgent(a) and not known_earlier
         score = value + (7 if relevant else -3) + (3 * math.exp(-age_days / 7) if dated else 0)
         score += max(-3, min(3, affinities[a.topic]))
         reports = [(m.source_id, stamp(m.published_at)) for m in found_fresh]
@@ -246,6 +270,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "published_at": material.published_at, "captured_at": material.captured_at,
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
+            "roundup": roundup,
             "known_earlier": known_earlier, "first_captured_at": first_captured,
             "latest_captured_at": latest_captured, "dated": dated, "timely": is_timely,
             "stale_reason": None if is_timely else "late" if dated else "undated",
@@ -296,6 +321,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         if not adds_information(event):
             continue
         if len(focus) >= 6 or spent + event["reading_seconds"] > budget * 0.7:
+            continue
+        if event["roundup"] and not event["protected"]:
             continue
         if topic_counts[event["topic"]] >= 3 and not event["protected"]:
             continue

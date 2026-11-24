@@ -696,7 +696,7 @@ export default function ReaderApp() {
       accept(
         await request<Run>("/refresh", {
           method: "POST",
-          body: JSON.stringify({ limit_per_source: 10, analyze_limit: 24 }),
+          body: JSON.stringify({}), // the server's defaults
         }),
       );
     } catch (e) {

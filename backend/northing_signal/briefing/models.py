@@ -160,7 +160,8 @@ class Interaction(Contract):
 
 class RefreshRequest(Contract):
     limit_per_source: int = Field(default=10, ge=1, le=20)
-    analyze_limit: int = Field(default=24, ge=0, le=120)
+    # 24 left most of a day's 300+ new materials unread (2026-11-24); ~1.5k tokens each.
+    analyze_limit: int = Field(default=80, ge=0, le=120)
 
 
 class SplitRequest(Contract):

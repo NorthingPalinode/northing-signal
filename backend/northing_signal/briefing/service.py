@@ -27,6 +27,7 @@ from .models import (
 )
 from .publish import publish
 from .relate import BATCH, MERGING, pair_id
+from .relate import POLICY as RELATION_POLICY
 from .relate import PROMPT as RELATION_PROMPT
 from .relate import candidates as relation_candidates
 from .relate import payload as relation_payload
@@ -35,6 +36,7 @@ from .report import report_range, weekly_report
 from .search_sources import SEARCH_SOURCES, source_access
 from .store import LOCAL_USER
 from .tracking import matches, project_follows
+from .triage import triage
 from .understand import POLICY_HASH, Analyzer, has_material
 
 PROJECTION_MAX_AGE = 600
@@ -362,7 +364,10 @@ class ContentService:
         if not limit or not self.analyzer.configured:
             return
         events = await asyncio.to_thread(self.neutral_events)
-        pairs = relation_candidates(events, self.store.relation_pairs(), clock=datetime.now(timezone.utc), limit=limit)
+        # A ROUNDUP answer from an older prompt may be stale: a roundup no longer leads an event.
+        checked_pairs = self.store.relation_pairs(
+            recheck=lambda relation, data: relation == "ROUNDUP" and data.get("policy") != RELATION_POLICY)
+        pairs = relation_candidates(events, checked_pairs, clock=datetime.now(timezone.utc), limit=limit)
         checked = merged = 0
         for start in range(0, len(pairs), BATCH):
             batch = pairs[start:start + BATCH]
@@ -383,7 +388,7 @@ class ContentService:
                     merged += outcome == "merged"
                 rows.append((older["id"], newer["id"], answer.relation,
                              {"reason": answer.reason, "recall": score, "outcome": outcome,
-                              "model": getattr(self.settings, "llm_model", "")}))
+                              "model": getattr(self.settings, "llm_model", ""), "policy": RELATION_POLICY}))
                 checked += 1
             self.store.record_relations(rows)
         run["relations"] = {"checked": checked, "merged": merged}
@@ -536,8 +541,18 @@ class ContentService:
                  and judgments[m.version]["epoch"] < POLICY_EPOCH and ready(m)]
         return (fresh + stale)[:limit]
 
-    async def analyze(self, materials, run, limit):
-        pending = self.pending_judgments(materials, limit)
+    def triaged(self, materials=None):
+        """Materials in the order the model should read them (triage.py): news reported by
+        several outlets first, catalogs and paper listings after articles, old finds last."""
+        materials = self.store.materials() if materials is None else materials
+        current = {v for v, j in self.store.judgments().items() if j.get("epoch", 0) >= POLICY_EPOCH}
+        return triage(materials, datetime.now(timezone.utc), self.store.refresh_times(), done=current)
+
+    async def analyze(self, materials, run, limit, again=False):
+        """Judge up to limit pending materials; again: judge exactly these, even if judged before
+        (a new prompt's judgment is stored beside the old one and wins as the newest)."""
+        pending = [m for m in materials if has_material(m)][:limit] if again \
+            else self.pending_judgments(materials, limit)
         run.update(stage="understanding", total=len(pending))
         if not self.analyzer.configured and pending:
             run["failed"] += len(pending)
@@ -698,8 +713,7 @@ class ContentService:
             run["stage"] = "reading"
             await enrich(self.store, limit=min(24, request.analyze_limit))
             run["stage"] = "understanding"
-            candidates = await asyncio.to_thread(self.store.materials)
-            candidates.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
+            candidates = await asyncio.to_thread(self.triaged)
             await self.analyze(candidates, run, request.analyze_limit)
             run["stage"] = "grouping"
             await self.relate_events(run)

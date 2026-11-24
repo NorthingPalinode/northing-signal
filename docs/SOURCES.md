@@ -71,11 +71,19 @@ X 接入依据：[近期检索](https://docs.x.com/x-api/posts/search/quickstart
 | 补充 | [Interconnects · Nathan Lambert](https://www.interconnects.ai/feed) | RSS / Atom 节选 | 3 / 3 |
 | 补充 | [Latent Space / AI News](https://latent.space/feed) | RSS / Atom 节选 | 3 / 3 |
 | 补充 | [量子位 · 公开 RSS](https://www.qbitai.com/feed) | RSS / Atom 节选 | 3 / 3 |
+| 补充 | [The Verge · AI](https://www.theverge.com/rss/ai-artificial-intelligence/index.xml) | RSS / Atom 全文 | 8 / 8 |
+| 补充 | [Ars Technica · AI](https://arstechnica.com/ai/feed/) | RSS / Atom 全文 | 8 / 8 |
+| 补充 | [CNBC · Technology](https://www.cnbc.com/id/19854910/device/rss/rss.html) | RSS 摘要（科技商业综合） | 8 / 0 |
+| 补充 | [MIT Technology Review · AI](https://www.technologyreview.com/topic/artificial-intelligence/feed) | RSS / Atom 全文 | 8 / 7 |
+| 补充 | [雷峰网](https://www.leiphone.com/feed) | RSS / Atom 全文 | 8 / 8 |
+| 补充 | [极客公园](https://www.geekpark.net/rss) | RSS / Atom 全文（科技商业综合） | 8 / 8 |
 | 补充 | [Arena · 文本偏好榜单](https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset) | 官方文本榜数据节选 | 1 / 1 |
 | 补充 | [SWE-bench Verified · 公开结果](https://www.swebench.com/) | 官方 Verified 数据节选 | 1 / 1 |
 | 补充 | [LiveBench · 官方更新记录](https://github.com/LiveBench/LiveBench/blob/main/changelog.md) | 官方更新记录 | 1 / 1 |
 | 补充 | [Tencent · 模型目录与模型卡](https://huggingface.co/tencent) | 模型目录 + 有界公开模型卡 | 3 / 1 |
 | 补充 | [ModelScope · Qwen 公开目录](https://modelscope.cn/models) | 公开目录元数据 | 3 / 0 |
+
+2026-11-24 补充：黄仁勋复任英伟达 CEO 当天，TechCrunch、The Decoder、量子位都已采集，却因相关性规则把产业新闻判为“与 AI 无关”而未进简报（已修正规则并重判）。同时补入上面六个科技与商业媒体（The Verge、Ars Technica、CNBC、MIT Technology Review、雷峰网、极客公园），固定入口增至 51 个；每源每次最多 8 条。试采时 36 氪与机器之心的 RSS 为空、虎嗅超时、VentureBeat 返回 429，未接入。
 
 ## 材料与展示规则
 
