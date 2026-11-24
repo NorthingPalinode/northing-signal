@@ -144,7 +144,8 @@ class ContentService:
                      model_configured=self.analyzer.configured, run=self.visible_run(self.run, user),
                      queue=[self.visible_run(r, user) for r in self.queued()],
                      policy=POLICY_HASH,
-                     last_visit=self.store.last_visit(user))
+                     last_visit=self.store.last_visit(user),
+                     previous_visit=self.store.previous_visit(user))
         _, upcoming = refresh_slots(datetime.now(timezone.utc), self.zone())
         value["schedule"] = {"enabled": value["preferences"]["auto_refresh"], "hours": list(REFRESH_HOURS),
                              "next": upcoming.astimezone(timezone.utc).isoformat()}

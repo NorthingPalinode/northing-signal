@@ -225,6 +225,49 @@ export function topThree(view: View | null) {
     .slice(0, 3);
 }
 
+export type Change = { story: Story; kind: "new" | "updated" | "correction"; label: string };
+
+/** What changed since the reader was last here, in the order of `list` (the briefing).
+ *
+ * New: first seen after `since`. Updated: an older story with a report captured after it,
+ * labelled by what that report did (a correction, a test, an update, or more reports).
+ * Stories already known or dismissed are left out: they were read. Null without a previous
+ * visit, so a first visit shows nothing rather than "everything changed". */
+export function sinceVisit(list: Story[], since?: string | null): Change[] | null {
+  const from = Date.parse(since ?? "");
+  if (Number.isNaN(from)) return null;
+  const after = (value?: string | null) => {
+    const at = Date.parse(value ?? "");
+    return !Number.isNaN(at) && at > from;
+  };
+  const corrects = (actions: Set<string>) => actions.has("correction") || actions.has("withdrawal");
+  const changes: Change[] = [];
+  for (const story of list) {
+    if (story.known || story.dismissed) continue;
+    if (after(story.first_captured_at ?? story.captured_at)) {
+      const correction = corrects(new Set([story.action]));
+      changes.push({
+        story,
+        kind: correction ? "correction" : "new",
+        label: correction ? "更正" : "新",
+      });
+      continue;
+    }
+    const fresh = story.timeline.filter((t) => after(t.captured_at));
+    if (!fresh.length) continue;
+    const actions = new Set(fresh.map((t) => t.action));
+    const label = corrects(actions)
+      ? "更正"
+      : actions.has("test")
+        ? "新测试"
+        : actions.has("update")
+          ? "有更新"
+          : `新报道 ${fresh.length} 篇`;
+    changes.push({ story, kind: label === "更正" ? "correction" : "updated", label });
+  }
+  return changes;
+}
+
 /** "今天 12:00" / "昨天 0:00" / "11月9日 12:00" relative to `now`. */
 export function clockLabel(value?: string | null, now = new Date()) {
   const date = new Date(value ?? "");

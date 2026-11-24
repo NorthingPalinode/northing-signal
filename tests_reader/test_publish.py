@@ -187,3 +187,18 @@ def test_an_edition_reads_as_headline_highlights_and_quick_items(tmp_path):
     page = (out / "index.html").read_text("utf-8")
     order = [page.index(h) for h in ("<h2>头条</h2>", "<h2>今日看点</h2>", "模型与多模态（6）", "快讯（5）")]
     assert order == sorted(order)
+
+
+def test_each_story_says_where_its_evidence_comes_from(tmp_path):
+    """The public page shows the rule-written evidence line, not only a small label."""
+    store, service = make(tmp_path)
+    add(store, material())
+    add(store, material(id="bench-post", source_id="blog", source_name="Blog",
+                        source_role="author", url="https://example.org/bench", captured_at="2026-11-01T02:00:00+00:00"),
+        evidence="reported_test", action="test")
+    event = service.view()["events"][0]
+    assert event["standing"] == "有官方原文 · 媒体或作者文中报告了测试 · 2 个来源"
+    out = tmp_path / "site"
+    service.publish_digest(out, clock=at(2, 0))
+    page = (out / "index.html").read_text("utf-8")
+    assert '<p class="standing"><b>依据</b>有官方原文 · 媒体或作者文中报告了测试 · 2 个来源</p>' in page

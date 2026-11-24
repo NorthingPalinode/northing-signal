@@ -131,6 +131,48 @@ def heat_trend(reports, at):
     return "rising" if len(now_sources) >= 2 and joined and earlier else None
 
 
+def standing(timeline, source_count=1):
+    """One plain line on where an event's evidence comes from, by rule, without a model call.
+
+    Who says it (an official or research original, or only outlets, authors, the community),
+    who reported a test (the party itself, the paper, or an outlet/author: never called
+    independent, since an article may relay the vendor's numbers), and how many sources.
+    "未见" means among the reports collected here, not that none exists.
+    """
+    roles = {t.get("role") for t in timeline}
+    kinds = {t.get("content_kind") for t in timeline}
+    # A leaderboard's numbers are the leaderboard's own runs, already named by "公开榜单数据".
+    tests = {t.get("role") for t in timeline
+             if t.get("evidence") == "reported_test" and t.get("content_kind") != "benchmark_snapshot"}
+    parts = []
+    if "benchmark_snapshot" in kinds:
+        parts.append("公开榜单数据")
+    elif "official" in roles:
+        parts.append("有官方原文")
+    elif "research" in roles:
+        parts.append("有论文原文")
+    elif roles <= {"community"}:
+        parts.append("仅社区发言")
+    elif all(t.get("evidence") == "opinion" for t in timeline):
+        parts.append("作者观点")
+    else:
+        parts.append("媒体或作者转述，未见官方原文")
+    if tests:
+        if tests & {"media", "author"}:
+            parts.append("媒体或作者文中报告了测试")
+        elif "community" in tests:
+            parts.append("社区发言中报告了测试")
+        elif tests == {"official"}:
+            parts.append("厂商自测，未见他方测试")
+        else:
+            parts.append("论文自报结果" if "official" not in tests else "厂商与论文自报结果")
+    if source_count > 1:
+        parts.append(f"{source_count} 个来源")
+    if {t.get("action") for t in timeline} & {"correction", "withdrawal"}:
+        parts.append("含更正或撤回")
+    return " · ".join(parts)
+
+
 def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
             briefing_at=None, new_since=None, refreshed=(), late_hours=None, thresholds=None):
     """membership: material id -> stored event id. Without it, events are derived as before.
@@ -269,6 +311,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "source_id": material.source_id,
             "published_at": material.published_at, "captured_at": material.captured_at,
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
+            "standing": standing(timeline, len({m.source_id for m, _, _ in members})),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
             "roundup": roundup,
             "known_earlier": known_earlier, "first_captured_at": first_captured,

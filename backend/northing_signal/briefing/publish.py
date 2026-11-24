@@ -24,9 +24,10 @@ from .models import TOPICS
 from .report import event_time, evidence_label
 
 SITE_TITLE = "Northing Signal 日报"
-TAGLINE = "AI 发布、测试与更正，每天两次。每条附原始出处与依据类型。"
+TAGLINE = "AI 发布、测试与更正，每天两次。每条写明依据来自谁：官方原文、厂商自测还是媒体转述。"
 DISCLAIMER = ("摘要由 AI 依据当时取得的原文节选整理，可能有误，请以原文为准。"
-              "依据类型区分来源陈述、文中报告的测试与作者观点，均不等于本项目独立验证。")
+              "「依据」一行按规则写出谁在陈述、谁报告了测试、有几个来源，均不等于本项目独立验证；"
+              "其中「未见」只指本项目已收取的报道。")
 FIRST_WINDOW = timedelta(hours=48)  # the first edition looks back this far
 MAX_AGE_DAYS = 7                    # older stories newly collected are not "news" (corrections excepted)
 # Editorial rules adapted from AIHOT's daily report, no model calls. 15 items in all (the owner's
@@ -110,7 +111,7 @@ def public_entry(event, since, section="main", followup=False):
         "id": event["id"], "version": event["version"], "title": event["title"],
         "summary": event.get("summary", ""), "reason": event.get("reason", ""),
         "topic": event.get("topic"), "topic_label": event.get("topic_label") or TOPICS.get(event.get("topic"), ""),
-        "evidence": evidence_label(event), "source": event.get("source", ""), "url": safe_url(event.get("url")),
+        "evidence": evidence_label(event), "standing": event.get("standing") or "", "source": event.get("source", ""), "url": safe_url(event.get("url")),
         "published_at": when.isoformat() if when else None,
         "source_count": event.get("source_count", 1),
         "status": "correction" if event.get("action") in {"correction", "withdrawal"}
@@ -196,10 +197,13 @@ BADGES = {"new": ("新", "new"), "updated": ("有更新", "updated"), "followup"
           "correction": ("更正", "correction")}
 
 
-def _meta(entry, zone):
+def _meta(entry, zone, evidence=True):
+    """Source, date, evidence and topic. Editions made before the evidence line show the label."""
     source = escape(entry["source"]) + (f" 等 {entry['source_count']} 个来源" if entry["source_count"] > 1 else "")
-    return " · ".join([source, _date(entry["published_at"], zone), escape(entry["evidence"]),
-                       escape(entry["topic_label"])])
+    parts = [source, _date(entry["published_at"], zone)]
+    if evidence:
+        parts.append(escape(entry.get("standing") or entry["evidence"]))
+    return " · ".join([*parts, escape(entry["topic_label"])])
 
 
 def _article(entry, zone, rank=None):
@@ -209,7 +213,9 @@ def _article(entry, zone, rank=None):
     parts = [f'<article id="e-{escape(entry["id"])}" class="story">',
              f'<h3>{f"<span class=rank>{rank}</span>" if rank else ""}{heading}'
              f' <span class="badge {badge_class}">{badge_text}</span></h3>',
-             f'<p class="meta">{_meta(entry, zone)}</p>']
+             f'<p class="meta">{_meta(entry, zone, evidence=not entry.get("standing"))}</p>']
+    if entry.get("standing"):
+        parts.append(f'<p class="standing"><b>依据</b>{escape(entry["standing"])}</p>')
     if entry["summary"]:
         parts.append(f'<p>{escape(entry["summary"])}</p>')
     if entry["reason"]:
@@ -243,7 +249,9 @@ border-bottom:1px solid var(--line);padding-bottom:8px}
 .story{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:12px 0}
 .story h3{margin:0;font-size:18px;line-height:1.5}.story p{margin:8px 0}
 .rank{display:inline-block;min-width:1.6em;color:var(--accent);font-variant-numeric:tabular-nums}
-.meta,.muted{color:var(--muted);font-size:13px}.reason{font-size:15px}.reason b{margin-right:8px;font-size:13px;
+.meta,.muted{color:var(--muted);font-size:13px}.standing{font-size:14px;margin:6px 0 8px;
+padding:2px 10px;border-left:3px solid var(--accent)}.standing b{margin-right:8px;font-size:13px;
+color:var(--muted)}.reason{font-size:15px}.reason b{margin-right:8px;font-size:13px;
 color:var(--muted)}.badge{font-size:12px;font-weight:500;border:1px solid currentColor;border-radius:999px;
 padding:0 8px;vertical-align:2px;white-space:nowrap}.badge.new{color:var(--new)}.badge.updated{color:var(--upd)}
 .badge.correction{color:var(--cor)}details{margin-top:8px;font-size:14px}summary{cursor:pointer;color:var(--muted)}

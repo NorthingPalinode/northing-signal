@@ -19,6 +19,7 @@ import {
   sections,
   setDisplayZone,
   siteZoneLabel,
+  sinceVisit,
   statusLabel,
   snapshotLabel,
   storyFromHash,
@@ -986,8 +987,56 @@ export default function ReaderApp() {
     const visibleMore = showAllMore ? more : more.slice(0, 6);
     const nothing = !focus.length && !radar.length && !more.length;
     const top = topThree(view);
+    // "Since you were last here": the briefing's real changes, the reason to come back.
+    const changes = historical || topic ? null : sinceVisit(briefingList, view.previous_visit);
+    const changed = changes?.map((c) => c.story) || [];
+    const newOnes = changes?.filter((c) => c.kind === "new").length || 0;
     return (
       <>
+        {changes && changes.length === 0 && (
+          <p className="r-delta-none">
+            距你上次来（{clockLabel(view.previous_visit)}）没有新的实质变化，下面是仍值得读的内容。
+          </p>
+        )}
+        {changes && changes.length > 0 && (
+          <section className="r-delta" aria-label="距你上次来的变化">
+            <header>
+              <h2>距你上次来，有 {changes.length} 件事变了</h2>
+              <small>
+                上次 {clockLabel(view.previous_visit)} ·{" "}
+                {[
+                  newOnes ? `${newOnes} 件新事` : "",
+                  changes.length - newOnes ? `${changes.length - newOnes} 件有新进展` : "",
+                ]
+                  .filter(Boolean)
+                  .join("，")}{" "}
+                · 读过的不再列出
+              </small>
+            </header>
+            <ul>
+              {changes.slice(0, 5).map(({ story: s, kind, label }) => (
+                <li key={s.id}>
+                  <button onClick={() => open(s, changed)}>
+                    <span className={"r-delta-tag " + kind}>{label}</span>
+                    <span className="r-delta-body">
+                      <strong>{s.title}</strong>
+                      <small>
+                        {s.source}
+                        {s.source_count > 1 ? ` 等 ${s.source_count} 个来源` : ""}
+                        {s.standing ? ` · ${s.standing}` : ""}
+                      </small>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {changes.length > 5 && (
+              <button className="r-link small" onClick={() => open(changed[5], changed)}>
+                还有 {changes.length - 5} 件，接着读
+              </button>
+            )}
+          </section>
+        )}
         {!topic && top.length > 0 && (
           <section className="r-top3" aria-label="最重要的几件事">
             <header>

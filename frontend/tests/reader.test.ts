@@ -13,6 +13,7 @@ import {
   sections,
   setDisplayZone,
   siteZoneLabel,
+  sinceVisit,
   statusLabel,
   storyFromHash,
   todayLabel,
@@ -200,4 +201,35 @@ test("dates follow the reader's timezone: New York by default, Beijing when chos
     options: [{ id: "America/New_York", label: "纽约时间" }, { id: "Asia/Shanghai", label: "北京时间" }] };
   assert.equal(siteZoneLabel(view([], { timezone: zone })), "纽约时间");
   assert.equal(siteZoneLabel(null), "");
+});
+
+test("since the last visit lists new and changed stories the reader has not read", () => {
+  const entry = (captured_at: string, action = "release") => ({
+    version: captured_at, title: "t", summary: "", source: "S", role: "media", url: "", published_at: null,
+    captured_at, action, evidence: "source_attributed", claims: [], conditions: [], limitations: [],
+  });
+  const since = "2026-11-02T00:00:00Z";
+  const list = [
+    story("fresh", { first_captured_at: "2026-11-02T03:00:00Z" }),
+    story("read", { first_captured_at: "2026-11-02T03:00:00Z", known: true }),
+    story("tested", { first_captured_at: "2026-11-01T00:00:00Z",
+      timeline: [entry("2026-11-01T00:00:00Z"), entry("2026-11-02T05:00:00Z", "test")] }),
+    story("fixed", { first_captured_at: "2026-11-01T00:00:00Z",
+      timeline: [entry("2026-11-01T00:00:00Z"), entry("2026-11-02T05:00:00Z", "correction")] }),
+    story("echo", { first_captured_at: "2026-11-01T00:00:00Z",
+      timeline: [entry("2026-11-01T00:00:00Z"), entry("2026-11-02T05:00:00Z"), entry("2026-11-02T06:00:00Z")] }),
+    story("quiet", { first_captured_at: "2026-11-01T00:00:00Z", timeline: [entry("2026-11-01T00:00:00Z")] }),
+  ];
+  const changes = sinceVisit(list, since)!;
+  assert.deepEqual(
+    changes.map((c) => [c.story.id, c.kind, c.label]),
+    [
+      ["fresh", "new", "新"],
+      ["tested", "updated", "新测试"],
+      ["fixed", "correction", "更正"],
+      ["echo", "updated", "新报道 2 篇"],
+    ],
+  );
+  assert.equal(sinceVisit(list, null), null);
+  assert.deepEqual(sinceVisit([list[5]], since), []);
 });
