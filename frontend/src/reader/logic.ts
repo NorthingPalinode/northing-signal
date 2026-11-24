@@ -1,5 +1,5 @@
 // Pure reader helpers: no React, DOM or network, so they run under node --test.
-import type { Page, Run, Story, Topic, View } from "./types";
+import type { Page, RepoRow, Run, Story, Topic, View } from "./types";
 
 export const topics: Record<Topic, string> = {
   models: "模型与多模态",
@@ -488,4 +488,32 @@ export function evidenceChecklist(story: Story) {
       ok: nodes.some((n) => ["correction", "withdrawal"].includes(n.entry.action)),
     },
   ];
+}
+
+/* ---------- open source rankings ---------- */
+
+export const rankingLabel: Record<string, string> = {
+  "github-trending-daily": "今日增速",
+  "github-trending-weekly": "本周增速",
+  "github-new": "近 30 天新项目",
+  "github-top": "star 总量",
+};
+export const repoFlagLabel: Record<string, string> = {
+  collection: "列表或教程合集",
+  few_forks: "fork 很少，热度存疑",
+};
+
+const count = (n: number) => n.toLocaleString("en-US");
+
+/** "Python · ★ 12,345 · +1,034 今日" or "· 创建于 11月1日" for search lists. */
+export function repoMeta(row: RepoRow, rankingId: string) {
+  const period = rankingId.endsWith("weekly") ? "本周" : "今日";
+  return [
+    row.language,
+    `★ ${count(row.stars)}`,
+    row.gained != null ? `+${count(row.gained)} ${period}` : "",
+    row.created_at ? `创建于 ${dayLabel(row.created_at)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }

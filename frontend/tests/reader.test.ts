@@ -23,6 +23,7 @@ import {
   pageFromHash as pageOf,
   trendFromHash,
   trendHash,
+  repoMeta,
   statusLabel,
   storyFromHash,
   todayLabel,
@@ -310,4 +311,13 @@ test("the evidence timeline orders stages, counts days and names missing ones", 
     ["change", "更正"],
   ]);
   assert.deepEqual(second.gaps, ["未见官方或论文原文"]);
+});
+
+test("repository rows say stars, the period's gain or the creation day", () => {
+  const repo = { name: "acme/kit", url: "", description: "", language: "Python", stars: 12345, forks: 10,
+    gained: 1034, topics: [], flags: [] };
+  assert.equal(repoMeta(repo, "github-trending-daily"), "Python · ★ 12,345 · +1,034 今日");
+  assert.equal(repoMeta(repo, "github-trending-weekly"), "Python · ★ 12,345 · +1,034 本周");
+  const created = repoMeta({ ...repo, language: "", gained: null, created_at: "2026-11-01T12:00:00Z" }, "github-new");
+  assert.match(created, /^★ 12,345 · 创建于 11月\d+日$/);
 });

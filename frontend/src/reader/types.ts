@@ -191,6 +191,8 @@ export type View = {
   last_visit?: string | null;
   /** When the reader last came before this sitting (visits under 30 minutes apart are one). */
   previous_visit?: string | null;
+  /** GitHub rankings from the latest update (open source and community). */
+  rankings?: Ranking[];
   /** The editable company table: companies and their product groups, in display order. */
   companies?: { id: string; name: string; products: { id: string; name: string }[] }[];
   events: Story[];
@@ -234,3 +236,29 @@ export type Page =
   | "saved"
   | "library"
   | "story";
+export type RepoRow = {
+  name: string;
+  url: string;
+  description: string;
+  language: string;
+  stars: number;
+  forks: number;
+  /** Stars gained in the Trending period; null on search lists. */
+  gained: number | null;
+  created_at?: string | null;
+  topics: string[];
+  /** "collection": a list or tutorial collection; "few_forks": stars far ahead of forks. */
+  flags: string[];
+};
+export type Ranking = {
+  id: string;
+  name: string;
+  kind: string;
+  url: string;
+  description: string;
+  status?: string;
+  error?: string | null;
+  /** When this list was fetched; it stays shown, with this time, if a later fetch fails. */
+  at?: string | null;
+  rows: RepoRow[];
+};

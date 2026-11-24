@@ -167,24 +167,36 @@ async def read_source(source, limit):
     return parse(source, body, limit)
 
 
-async def collect(store, sources, limit=10, progress=None):
+async def collect(store, sources, limit=10, progress=None, github_token=""):
+    """github_token: optional, raises the GitHub search API's anonymous rate limit."""
+    from .github import KINDS as RANKINGS
+    from .github import read_ranking
     semaphore = asyncio.Semaphore(4)
 
     async def one(source):
         async with semaphore:
             previous = store.source_states().get(source["id"], {})
             try:
-                rows = await asyncio.wait_for(read_source(source, limit), 35)
-                added = sum(store.capture(row) for row in rows)
-                value = {"status": "ok" if rows else "empty", "at": now(), "last_success": now(),
-                         "count": len(rows), "added": added,
-                         "with_text": sum(bool(r.text.strip()) and r.content_kind not in {"search_excerpt", "catalog_metadata"} for r in rows),
-                         "error": None}
+                if source.get("kind") in RANKINGS:
+                    # A ranking, not materials: kept in the source's state, never judged.
+                    ranked = await asyncio.wait_for(read_ranking(source, fetch, github_token), 35)
+                    value = {"status": "ok" if ranked else "empty", "at": now(), "last_success": now(),
+                             "count": len(ranked), "added": 0, "with_text": 0, "error": None,
+                             "ranking": ranked, "ranking_at": now()}
+                else:
+                    rows = await asyncio.wait_for(read_source(source, limit), 35)
+                    added = sum(store.capture(row) for row in rows)
+                    value = {"status": "ok" if rows else "empty", "at": now(), "last_success": now(),
+                             "count": len(rows), "added": added,
+                             "with_text": sum(bool(r.text.strip()) and r.content_kind not in {"search_excerpt", "catalog_metadata"} for r in rows),
+                             "error": None}
             except Exception as error:
                 value = {"status": "error", "at": now(), "last_success": previous.get("last_success"),
                          "count": 0, "added": 0, "error": type(error).__name__}
                 if getattr(error, "response", None) is not None:
                     value["http_status"] = error.response.status_code
+                if "ranking" in previous:  # keep showing the last list, with its own time
+                    value.update(ranking=previous["ranking"], ranking_at=previous.get("ranking_at"))
             store.source_state(source["id"], value)
             if progress:
                 progress(source["name"], value)

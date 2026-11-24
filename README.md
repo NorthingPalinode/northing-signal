@@ -6,7 +6,7 @@
 
 当前采用独立的 Python / React 内容引擎。旧版目标工作台与 G1–G4 研究材料已从主分支移除，保存在 [`archive/research-g1-g4`](https://github.com/NorthingPalinode/northing-signal/tree/archive/research-g1-g4) 分支；旧个人数据库未自动迁移或删除，可以用 `scripts/export_legacy.py` 导出。
 
-当前版本已接入 **61 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
+当前版本已接入 **65 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
 
 ## 可以做什么
 
@@ -40,7 +40,10 @@
   - 按产品筛选，例如 OpenAI 的「ChatGPT（含 Codex）」「API 与模型」「Sora」，另有每家公司都有的「研究与安全」「公司与政策」。一条进展可以同时属于多个产品（一次模型发布既进 ChatGPT 也进 API）。
   - 公司名旁显示自你上次来的新动作数。
   - 公司、产品与官方来源的对应关系在 [`data/companies.json`](data/companies.json)，可以直接编辑：英文名按大小写与整词匹配，中文按字面匹配；一个名字包含在更长的名字里时（Claude 与 Claude Code）只算更长的那个。
-- **开源与社区**：开源项目的版本发布（vLLM、llama.cpp 等）与社区发言。
+- **开源与社区**：顶部是 GitHub 榜单，分「今日增速」「本周增速」「近 30 天新项目」「star 总量」四个子榜；下面是整理过的开源项目版本发布（vLLM、llama.cpp 等）与社区发言。
+  - 增速来自 GitHub Trending（公开网页，没有官方接口），显示这段时间新增的 star；新项目与总量来自 GitHub 官方搜索接口，按 `llm`、`ai-agents`、`generative-ai` 主题分别查询后合并。
+  - 只保留 AI 相关项目（仓库名、描述与主题标签）。列表与教程合集标「列表或教程合集」；star 超过 1000 而 fork 不到 star 的 3% 标「fork 很少，热度存疑」，只是比例标注，仅供参考。star 代表关注度，不代表质量。
+  - 榜单在每次更新时取得，不调用模型、不进入简报；获取失败时在「来源状态」显示，并继续展示上一次取得的榜单与它的时间。话题追踪的补查不会顺带刷新榜单。
 - **研究**：论文、研究博客，以及他方做的评测（公司测自己的产品只在公司线上）。
 - **政策与产业**：监管、出口管制、投融资、并购与人事。
 
@@ -105,7 +108,7 @@ python -m northing_signal.briefing publish --out .local/public
 
 ## 信息来源
 
-固定来源池已从 12 个扩展为 61 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
+固定来源池已从 12 个扩展为 65 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
 
 | 固定来源类型 | 数量 | 代表来源与材料 |
 |---|---:|---|
@@ -114,6 +117,7 @@ python -m northing_signal.briefing publish --out .local/public
 | 模型目录与模型卡 | 10 | 九个 Hugging Face 官方组织，以及 ModelScope 的 Qwen 公开目录 |
 | 论文发现 | 2 | arXiv 分类查询、Hugging Face Daily Papers |
 | 评测数据与项目更新 | 3 | Arena 文本榜、SWE-bench Verified；LiveBench 当前仅更新记录 |
+| GitHub 榜单 | 4 | Trending 今日榜与本周榜（公开网页）、近 30 天新建与 star 总量（官方搜索接口），只保留 AI 项目，不经模型整理 |
 | RSS / Atom | 28 | OpenAI、Google AI 官方博客、Microsoft 新闻中心与 Azure、Apple、Amazon 与 AWS、NVIDIA 新闻稿、Google DeepMind、研究机构、Simon Willison、Interconnects、Latent Space、量子位；科技与商业媒体 The Verge、Ars Technica、CNBC、MIT Technology Review、雷峰网、极客公园等 |
 
 这些是入口数量，不等于独立发布方数，也不代表完整或持续覆盖。另有以下九类主动检索入口，与固定池另计：
@@ -245,6 +249,7 @@ LLM_MODEL=your-model
 | `READER_WEB_API_KEY` | 本项目自己的 AnySearch 密钥；留空时匿名访问，受提供方限额约束 |
 | `READER_OPENALEX_API_KEY` | 本项目自己的 OpenAlex 密钥；留空时使用匿名基础接口 |
 | `READER_X_BEARER_TOKEN` | 自有授权的 X 应用 Bearer Token；不配置时仅检索公开网页线索 |
+| `READER_GITHUB_TOKEN` | 自己的 GitHub 个人令牌（无需任何权限），只用于 GitHub 搜索接口的「近 30 天新项目」「star 总量」两个榜单，提高匿名额度；Trending 不需要 |
 | `READER_REQUESTS_PER_DAY`、`READER_TOKENS_PER_DAY` | 可选的每日模型调用上限；留空不限制 |
 | `READER_TIMEZONE` | 站点时区，默认 `America/New_York`：决定 0 点/12 点自动更新、每日用量与读者额度的重置时间、也是读者没选时区时的默认显示（公开日报另用 `READER_PUBLISH_TIMEZONE`）；可改成 `Asia/Shanghai`，设为空值使用系统时区。每位读者可在「阅读偏好 → 时区」切换纽约时间或北京时间，只影响自己看到的日期时间和周报起止日；可选时区在 `models.py` 的 `TIMEZONES` 中增加 |
 | `READER_BATCH_SIZE` | 每次模型请求整理的材料数，默认 4（1–6）；回复被截断时自动对半拆分重试 |
