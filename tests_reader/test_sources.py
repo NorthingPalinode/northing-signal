@@ -82,6 +82,22 @@ def test_model_cards_are_public_bounded_and_catalog_dates_are_not_release_dates(
     assert len(rows)==1 and rows[0].published_at is None and not has_material(rows[0])
 
 
+def test_model_catalogs_date_entries_by_repository_creation_not_last_edit():
+    # moonshotai/Kimi-K3 (2026-11-23): an edit in November put a June model first in the list.
+    payload = json.dumps([{"id": "owner/old-model", "createdAt": "2026-06-13T06:42:57.000Z",
+                           "lastModified": "2026-11-20T02:36:10.000Z"}]).encode()
+
+    async def card(url, hosts):
+        return ("# Old model\nA model card that was edited recently.\n" * 50).encode()
+
+    rows = asyncio.run(hub_models(source("hub_models", organization="owner"), payload, 3, card))
+    assert rows[0].published_at.startswith("2026-06-13")
+    catalog = {"success": True, "data": {"models": [{"id": "owner/model", "created_at": "2026-08-12T09:25:21Z",
+                                                     "last_modified": "2026-11-08", "private": False}]}}
+    rows = parse(source("modelscope_models", organization="owner"), json.dumps(catalog).encode(), 3)
+    assert rows[0].published_at.startswith("2026-08-12")
+
+
 def test_paper_indexes_do_not_promote_curation_time_or_private_reviews():
     rows = parse(source("daily_papers"), json.dumps([{"publishedAt":"2026-11-08", "paper":{
         "id":"2611.00001", "title":"Research", "summary":"Original abstract.", "publishedAt":"2026-11-01"}}]).encode(), 3)
@@ -184,3 +200,13 @@ def test_arxiv_fixed_feeds_and_discovery_share_serial_request_spacing(monkeypatc
                              collection.fetch("https://rss.arxiv.org/rss/cs.AI", {"rss.arxiv.org"}))
     asyncio.run(scenario())
     assert calls == [0.0, 3.0]
+
+
+def test_every_model_catalog_is_told_a_card_is_not_a_launch():
+    from northing_signal.briefing.understand import PROMPT, is_model_card
+    from test_reader import material as fixture
+    assert is_model_card(fixture(source_id="hf-kimi")) and is_model_card(fixture(source_id="modelscope-qwen"))
+    assert is_model_card(fixture(source_id="huggingface-discovery"))
+    assert not is_model_card(fixture(source_id="hf-daily-papers")) and not is_model_card(fixture(source_id="openai"))
+    # The title rules that keep explainers, past launches and model cards from reading as releases.
+    assert "不改写成发布" in PROMPT and "本身不证明刚发布" in PROMPT

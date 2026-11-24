@@ -31,7 +31,7 @@ def legacy_database(path):
 
 
 # Columns every schema version has; later migrations may add more.
-COLUMNS = {"judgments": "version, policy, data, model, created_at"}
+COLUMNS = {"judgments": "version, policy, data, model, created_at", "follows": "id, data"}
 
 
 def dump(path, tables):

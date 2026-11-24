@@ -45,19 +45,25 @@ export function when(value?: string | null, capturedAt?: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
-  return hasPublished ? label : `收录于 ${label}`;
+  // Collection time is when we saw it, not when it happened (an old model card can be new to us).
+  return hasPublished ? label : `发布时间未知，收录于 ${label}`;
 }
 
 type NewsDate = { published_at: string | null; captured_at?: string };
 
-function newestFirst<T extends NewsDate>(rows: T[]): T[] {
+/** undatedLast: stories without a publication date follow the dated ones instead of passing
+ * as "just published" by their collection time. Raw materials keep collection order. */
+function newestFirst<T extends NewsDate>(rows: T[], undatedLast = false): T[] {
   const time = (row: NewsDate) => {
     const published = Date.parse(row.published_at ?? "");
-    if (Number.isFinite(published)) return published;
+    if (Number.isFinite(published)) return [1, published];
     const captured = Date.parse(row.captured_at ?? "");
-    return Number.isFinite(captured) ? captured : Number.MIN_SAFE_INTEGER;
+    return [undatedLast ? 0 : 1, Number.isFinite(captured) ? captured : Number.MIN_SAFE_INTEGER];
   };
-  return [...rows].sort((a, b) => time(b) - time(a));
+  return [...rows].sort((a, b) => {
+    const [ra, ta] = time(a), [rb, tb] = time(b);
+    return rb - ra || tb - ta;
+  });
 }
 export const evidence = (value: string, role?: string, kind?: string) =>
   kind === "benchmark_snapshot"
@@ -114,7 +120,7 @@ export function sections(
   selectedFollow: string,
 ) {
   const matches = (e: Story) => matchesStory(e, topic, query);
-  const events = newestFirst(view?.events.filter(matches) || []);
+  const events = newestFirst(view?.events.filter(matches) || [], true);
   const saved = view?.saved_events || view?.events.filter((e) => e.saved) || [];
   const follows = view?.follows || [];
   const followed = follows.find((f) => f.id === selectedFollow) || follows[0];
@@ -123,17 +129,19 @@ export function sections(
     focus: events.filter((e) => view?.focus.includes(e.id)),
     radar: events.filter((e) => view?.radar.includes(e.id)),
     discover: events.filter((e) => e.qualified && !e.dismissed),
-    /** Qualified stories the briefing did not already show as focus or radar. */
+    /** Qualified news the briefing did not already show as focus or radar. Late finds and
+     * undated reports stay out of the briefing; search still finds them. */
     more: events.filter(
       (e) =>
         e.qualified &&
         !e.dismissed &&
+        e.timely !== false &&
         !view?.focus.includes(e.id) &&
         !view?.radar.includes(e.id),
     ),
     follows,
     followed,
-    saved: newestFirst(saved.filter(matches)),
+    saved: newestFirst(saved.filter(matches), true),
     followingEvents: events.filter((e) => followed?.event_ids.includes(e.id)),
     archive: newestFirst(view?.archive || []),
     okSources: view?.sources.filter((s) => s.state.status === "ok").length || 0,
@@ -221,7 +229,9 @@ export function queueLabel(run: Run) {
     ? `追踪「${run.follow_name}」`
     : run.kind === "discovery"
       ? `搜索「${run.query}」`
-      : "更新情报";
+      : run.kind === "other"
+        ? "其他读者的任务"
+        : "更新情报";
 }
 
 /** Events a reader may fold this one into: same topic, newest first. */

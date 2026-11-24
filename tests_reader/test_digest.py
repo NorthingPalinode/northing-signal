@@ -170,3 +170,91 @@ def test_weekly_report_endpoint(tmp_path):
         body = client.get("/api/reader/reports/weekly?range=last_week").json()
         assert body["count"] == 0 and body["markdown"].startswith("# Northing Signal 周报")
         assert client.get("/api/reader/reports/weekly?range=year").status_code == 422
+
+
+def test_late_and_undated_reports_are_archived_not_news():
+    # Kimi K3 (2026-11-23): a June model card collected in November must not read as today's news.
+    from northing_signal.briefing.engine import timely
+    clock = "2026-11-02T06:00:00+00:00"
+    card = material(id="card", url="https://example.org/card", published_at=None,
+                    captured_at="2026-11-02T05:00:00+00:00", text="Nova 1 model card.")
+    late = material(id="late", url="https://example.org/late", published_at="2026-10-20T00:00:00+00:00",
+                    captured_at="2026-11-02T05:00:00+00:00", text="Vega 2 is available.")
+    fresh = material(id="fresh", url="https://example.org/fresh", captured_at="2026-11-02T05:00:00+00:00",
+                     published_at="2026-11-02T04:00:00+00:00", text="Orion 3 is available.")
+    judgments = {card.version: assessment(subject="Nova", object="Nova 1", event_key="nova-1",
+                                          title="Nova 1 发布").model_dump(),
+                 late.version: assessment(subject="Vega", object="Vega 2", event_key="vega-2",
+                                          title="Vega 2 发布").model_dump(),
+                 fresh.version: assessment(subject="Orion", object="Orion 3", event_key="orion-3",
+                                           title="Orion 3 发布").model_dump()}
+    value = project([card, late, fresh], judgments, Preferences(), as_of=clock,
+                    new_since="2026-11-02T04:30:00+00:00")
+    events = {e["title"]: e for e in value["events"]}
+    assert events["Nova 1 发布"]["stale_reason"] == "undated" and events["Vega 2 发布"]["stale_reason"] == "late"
+    assert events["Orion 3 发布"]["timely"] and events["Orion 3 发布"]["new"]
+    shown = set(value["focus"]) | set(value["radar"])
+    assert shown == {events["Orion 3 发布"]["id"]}
+    assert not events["Nova 1 发布"]["new"] and not events["Vega 2 发布"]["new"]  # no 【新】 for late finds
+    # Days the service was off do not make their news old: the window starts at the update before.
+    off = material(published_at="2026-10-28T00:00:00+00:00", captured_at="2026-11-02T05:00:00+00:00")
+    assert not timely(off)
+    assert timely(off, refreshed=[stamp_("2026-10-27T12:00:00+00:00")])
+    # A curated list that lags by nature gets its own window.
+    paper = material(published_at="2026-10-29T00:00:00+00:00", captured_at="2026-11-02T05:00:00+00:00")
+    assert not timely(paper) and timely(paper, hours=168)
+
+
+def test_an_old_report_found_late_does_not_mark_an_event_updated():
+    first = material(id="first", captured_at="2026-11-01T01:00:00+00:00")
+    old_copy = material(id="old-copy", url="https://example.org/old-copy", source_id="blog", source_name="Blog",
+                        published_at="2026-09-01T00:00:00+00:00", captured_at="2026-11-02T05:10:00+00:00",
+                        text="Atlas 2 is available. Free for research. A blog recap.")
+    judgments = {first.version: assessment().model_dump(), old_copy.version: assessment().model_dump()}
+    value = project([first, old_copy], judgments, Preferences(), as_of="2026-11-02T06:00:00+00:00",
+                    new_since="2026-11-02T05:00:00+00:00")
+    event = value["events"][0]
+    assert event["report_count"] == 2 and event["timely"] and not event["updated"]
+
+
+def stamp_(value):
+    from northing_signal.briefing.engine import stamp
+    return stamp(value)
+
+
+def test_heat_counts_each_outlet_once_and_marks_rising_stories():
+    from datetime import timedelta
+
+    from northing_signal.briefing.engine import heat, heat_trend
+    at = stamp_("2026-11-02T12:00:00+00:00")
+    hours = lambda n: at - timedelta(hours=n)  # noqa: E731
+    # One outlet's ten articles count once; a second outlet adds; reports older than 48 h do not.
+    one_outlet = [("decoder", hours(1))] * 10
+    assert heat(one_outlet, at)[0] == heat([("decoder", hours(1))], at)[0]
+    two = heat([("decoder", hours(1)), ("qbitai", hours(2)), ("old", hours(50))], at)
+    assert set(two[1]) == {"decoder", "qbitai"} and 1.8 < two[0] < 2
+    assert heat([("decoder", hours(24))], at)[0] == 0.5  # halves each day
+    # Rising: a second outlet joined in the last six hours.
+    assert heat_trend([("decoder", hours(20)), ("qbitai", hours(2))], at) == "rising"
+    assert heat_trend([("decoder", hours(20)), ("qbitai", hours(10))], at) is None
+    assert heat_trend([("decoder", hours(2)), ("qbitai", hours(1))], at) is None  # nothing before: just new
+
+
+def test_a_story_many_outlets_report_ranks_above_an_equal_single_report():
+    clock = "2026-11-02T12:00:00+00:00"
+    solo = material(id="solo", url="https://example.org/solo", published_at="2026-11-02T08:00:00+00:00",
+                    captured_at="2026-11-02T09:00:00+00:00", text="Orion 3 is available.")
+    items = [solo]
+    judgments = {solo.version: assessment(subject="Orion", object="Orion 3", event_key="orion-3",
+                                          title="Orion 3 发布").model_dump()}
+    for index, outlet in enumerate(["a", "b", "c"]):
+        report = material(id="nova-" + outlet, url=f"https://example.org/nova-{outlet}", source_id=outlet,
+                          source_name=outlet, published_at="2026-11-02T08:00:00+00:00",
+                          captured_at=f"2026-11-02T09:0{index}:00+00:00", text=f"Nova 1 is available. {outlet}")
+        items.append(report)
+        judgments[report.version] = assessment(subject="Nova", object="Nova 1", event_key="nova-1",
+                                               title="Nova 1 发布").model_dump()
+    events = {e["title"]: e for e in project(items, judgments, Preferences(), as_of=clock)["events"]}
+    nova, orion = events["Nova 1 发布"], events["Orion 3 发布"]
+    assert nova["source_count"] == 3 and nova["heat"] > orion["heat"]
+    assert 3 < nova["score"] - orion["score"] <= 4  # a real lift, bounded at 4

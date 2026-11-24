@@ -62,14 +62,68 @@ def active_actions(interactions):
     return [r for r in interactions if r["request_id"] not in retracted and r["kind"] != "retract"]
 
 
+LATE_HOURS = 48  # found later than this after publication: archived, not news (AIHOT's rule)
+SELECT_THRESHOLD = 9  # significance*3 + novelty*2 + usefulness a story needs (see calibrate.py)
+
+
+def threshold_group(role):
+    """A publisher's own words and other sources may need different thresholds (AIHOT's tiers)."""
+    return "official" if role in {"official", "research"} else "other"
+
+
+def timely(material, refreshed=(), hours=LATE_HOURS):
+    """Was this report found while it was news? Undated reports never are.
+
+    The window counts from the update before the capture, not the capture itself, so days
+    the service was off do not turn the news of those days into old news. A new source's
+    first import (its back catalogue) and old articles found by search stay late.
+    refreshed: sorted completion times of earlier updates.
+    """
+    published, captured = stamp(material.published_at), stamp(material.captured_at)
+    if not published or not captured:
+        return False
+    before = [t for t in refreshed if t < captured]
+    since = before[-1] if before else captured
+    return published >= since - timedelta(hours=hours)
+
+
+# Event heat (AIHOT's rule): independent sources reporting within 48 h, each source once at its
+# first report, halving every 24 h. Ten articles from one outlet count once.
+HEAT_WINDOW, HEAT_HALF_LIFE, RISING_LOOKBACK = timedelta(hours=48), 24.0, timedelta(hours=6)
+
+
+def heat(reports, at):
+    """reports: (source id, report time) of news found while fresh. Returns (heat, sources)."""
+    first = {}
+    for source, when in reports:
+        if when <= at and at - when <= HEAT_WINDOW:
+            first[source] = min(first.get(source, when), when)
+    value = sum(0.5 ** ((at - when).total_seconds() / 3600 / HEAT_HALF_LIFE) for when in first.values())
+    return round(value, 2), first
+
+
+def heat_trend(reports, at):
+    """"rising": two or more sources now, at least one of them new in the last six hours."""
+    _, now_sources = heat(reports, at)
+    _, earlier = heat(reports, at - RISING_LOOKBACK)
+    joined = set(now_sources) - set(earlier)
+    return "rising" if len(now_sources) >= 2 and joined and earlier else None
+
+
 def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
-            briefing_at=None, new_since=None):
+            briefing_at=None, new_since=None, refreshed=(), late_hours=None, thresholds=None):
     """membership: material id -> stored event id. Without it, events are derived as before.
 
     briefing_at: when the current briefing was made (the latest completed update). "Known" marked
     after it greys the story but only leaves the focus at the next update, so a briefing does not
     reshuffle while it is read. new_since: start of that update; events first captured since are new.
+    refreshed: completion times of earlier updates; late_hours: source id -> hours a report may
+    take to be found and still count as news (default LATE_HOURS). thresholds: threshold group
+    -> minimum score (default SELECT_THRESHOLD), set from the owner's calibration.
     """
+    thresholds = thresholds or {}
+    refreshed = sorted(t for t in (stamp(v) if isinstance(v, str) else v for v in refreshed) if t)
+    late_hours = late_hours or {}
     settled = stamp(briefing_at) if briefing_at else None
     fresh_from = stamp(new_since) if new_since else None
     clock = stamp(as_of) if as_of else datetime.now(timezone.utc)
@@ -133,9 +187,20 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
                     a.significance * 3 + a.novelty * 2 + a.usefulness, date)
         material, a, row = max(members, key=priority)
         value = a.significance * 3 + a.novelty * 2 + a.usefulness
+        minimum = thresholds.get(threshold_group(material.source_role), SELECT_THRESHOLD)
         qualified = (bool(a.claims) and a.evidence != "insufficient"
-                     and (value >= 9 or a.action in {"correction", "withdrawal"}))
-        date = stamp(material.published_at) or stamp(material.captured_at)
+                     and (value >= minimum or a.action in {"correction", "withdrawal"}))
+        # Collection time says when we saw it, not when it happened: an undated model card or
+        # changelog may describe something months old (Kimi K3, 2026-11-23). Without any
+        # publication date among the reports the event earns no recency and stays out of focus.
+        published = [d for m, _, _ in members if (d := stamp(m.published_at))]
+        dated = bool(published)
+        # News only when some report was found while fresh: late finds and undated reports
+        # are archived under their own date, searchable, but never "today" (2026-11-24).
+        found_fresh = [m for m, _, _ in members
+                       if timely(m, refreshed, late_hours.get(m.source_id, LATE_HOURS))]
+        is_timely = bool(found_fresh)
+        date = stamp(material.published_at) or (min(published) if published else stamp(material.captured_at))
         age_days = max(0, (clock - date).total_seconds() / 86400)
         version = material.version
         relevant = a.topic in preferences.topics
@@ -147,8 +212,12 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         latest_captured = max(m.captured_at for m, _, _ in members)
         dismissed = any(r["kind"] in {"irrelevant", "thin", "duplicate"} for r in recent_actions)
         protected = a.action in {"correction", "withdrawal"} and not known_earlier
-        score = value + (7 if relevant else -3) + 3 * math.exp(-age_days / 7)
+        score = value + (7 if relevant else -3) + (3 * math.exp(-age_days / 7) if dated else 0)
         score += max(-3, min(3, affinities[a.topic]))
+        reports = [(m.source_id, stamp(m.published_at)) for m in found_fresh]
+        heat_value, _ = heat(reports, clock)
+        # Many outlets reporting it now: a bounded lift, at most +4 (from the second source on).
+        score += min(4, 2 * max(0, heat_value - 1))
         if preferences.depth == "technical" and a.content_type in {"research", "test", "tutorial"}:
             score += 3
         if preferences.depth == "overview" and a.content_type in {"release", "industry"}:
@@ -159,7 +228,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             score -= 20
         timeline = [{"version": m.version, "title": b.title or m.title, "summary": b.summary,
                      "source": m.source_name, "role": m.source_role, "url": m.url,
-                     "published_at": m.published_at, "action": b.action,
+                     "published_at": m.published_at, "captured_at": m.captured_at, "action": b.action,
                      "content_kind": m.content_kind,
                      "evidence": b.evidence, "claims": [c.model_dump() for c in b.claims],
                      "conditions": b.conditions, "limitations": b.limitations}
@@ -178,11 +247,15 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
             "known_earlier": known_earlier, "first_captured_at": first_captured,
-            "latest_captured_at": latest_captured,
-            # New: first seen in the latest update. Updated: an older event that got a new report in it.
-            "new": bool(fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
+            "latest_captured_at": latest_captured, "dated": dated, "timely": is_timely,
+            "stale_reason": None if is_timely else "late" if dated else "undated",
+            "heat": heat_value, "heat_trend": heat_trend(reports, clock),
+            "earliest_published_at": min(published).isoformat() if published else None,
+            # New: first seen in the latest update. Updated: an older event that got a new report in
+            # it. Both only for news found while fresh: a late find is neither.
+            "new": bool(is_timely and fresh_from and stamp(first_captured) and stamp(first_captured) >= fresh_from),
             "updated": bool(fresh_from and stamp(first_captured) and stamp(first_captured) < fresh_from
-                            and stamp(latest_captured) and stamp(latest_captured) >= fresh_from),
+                            and any(stamp(m.captured_at) >= fresh_from for m in found_fresh)),
             "saved": any(r["kind"] == "saved" for r in actions if r["event_id"] == event_id),
             "relevant": relevant, "score": round(score, 2), "timeline": timeline,
             "age_days": round(age_days, 1),
@@ -195,7 +268,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         })
     events.sort(key=lambda row: (not row["protected"], -row["score"], row["id"]))
     eligible = [e for e in events if e["qualified"] and not e["dismissed"] and not e["known_earlier"]
-                and (e["relevant"] or preferences.exploration) and (e["age_days"] <= 30 or e["protected"])]
+                and (e["relevant"] or preferences.exploration) and (e["age_days"] <= 30 or e["protected"])
+                and (e["timely"] or e["protected"])]
     focus, radar, spent = [], [], 0
     topic_counts = defaultdict(int)
     budget = preferences.budget_minutes * 60

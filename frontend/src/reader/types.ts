@@ -71,6 +71,12 @@ export type Story = {
   new?: boolean;
   /** An older event that got a new report in the latest update. */
   updated?: boolean;
+  /** Found while it was news. Late finds and undated reports are archived, not "today". */
+  timely?: boolean;
+  stale_reason?: "late" | "undated" | null;
+  /** Independent outlets reporting within 48 h, each once, halving daily. */
+  heat?: number;
+  heat_trend?: "rising" | null;
   /** Known before the latest update: it has left the focus. Marked since: only greyed. */
   known_earlier?: boolean;
   score?: number;
@@ -198,6 +204,8 @@ export type View = {
   follows?: Follow[];
   saved_events?: Story[];
   confirmed_follow_id?: string;
+  /** The signed-in account (absent on snapshots of past briefings). */
+  account?: import("../auth").Account;
 };
 export type Page =
   | "briefing"

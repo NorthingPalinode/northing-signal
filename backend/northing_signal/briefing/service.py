@@ -25,12 +25,24 @@ from .models import (
     now,
 )
 from .publish import publish
+from .relate import BATCH, MERGING, pair_id
+from .relate import PROMPT as RELATION_PROMPT
+from .relate import candidates as relation_candidates
+from .relate import payload as relation_payload
+from .relate import validate as relation_validator
 from .report import report_range, weekly_report
 from .search_sources import SEARCH_SOURCES, source_access
+from .store import LOCAL_USER
 from .tracking import matches, project_follows
 from .understand import POLICY_HASH, Analyzer, has_material
 
 PROJECTION_MAX_AGE = 600
+PROJECTION_CACHE = 64  # readers whose projection is kept in memory
+# Past briefings are saved for readers seen within this window when an update completes.
+SNAPSHOT_ACTIVE_DAYS, SNAPSHOT_READERS = 30, 200
+# Fields of another reader's run that may be shown: the worker is busy, not what they asked for.
+SHARED_RUN_FIELDS = ("id", "kind", "state", "stage", "queued_at", "started_at", "finished_at",
+                     "sources_done", "current_source", "analyzed", "failed", "manual", "trigger", "total")
 # Later batches would fail the same way: no budget, no model, or the provider is unreachable.
 QUEUE_LIMIT = 8
 STOP_ANALYSIS = {"daily_model_budget_reached", "model_not_configured", "model_request_failed"}
@@ -52,6 +64,8 @@ class ContentService:
     def __init__(self, store, settings):
         self.store, self.settings = store, settings
         self.sources = json.loads((settings.root / "data/briefing_sources.json").read_text("utf-8"))["sources"]
+        # Sources whose reports arrive late by nature (curated paper lists) get a longer window.
+        self.late_hours = {s["id"]: s["late_hours"] for s in self.sources if "late_hours" in s}
         self.analyzer = Analyzer(store, settings,
                                  requests_per_day=getattr(settings, "reader_requests_per_day", None),
                                  tokens_per_day=getattr(settings, "reader_tokens_per_day", None))
@@ -63,33 +77,35 @@ class ContentService:
         self.last_topic_collection = None
         self.intent = IntentEngine(self.analyzer, store)
         store.adopt_policy(POLICY_HASH)
-        self._projection = (None, 0, None)
+        self._projection = {}  # reader -> (revision, monotonic time, value)
         self._assigned = None  # content revision whose materials all have events
 
-    def projection(self):
-        """Events, saved events and follows: recomputed only after stored data changes.
+    def projection(self, user=LOCAL_USER):
+        """One reader's events, saved events and follows: recomputed only after stored data changes.
 
         Revisions cover every table the projection reads; the age limit keeps time-based
         ranking (recency decay, the 30-day window) from going stale on an idle database.
         """
         self.assign_events()
         revision = self.store.revision()
-        cached_revision, cached_at, cached = self._projection
+        cached_revision, cached_at, cached = self._projection.get(user, (None, 0, None))
         if cached_revision == revision and time.monotonic() - cached_at < PROJECTION_MAX_AGE:
             return cached
         materials, judgments = self.store.materials(), self.store.judgments()
-        preferences = self.store.preferences()
+        preferences = self.store.preferences(user)
         membership = self.membership()
-        interactions = self.attribute(self.store.interactions(), membership)
+        interactions = self.attribute(self.store.interactions(user=user), membership)
         latest = self.store.last_refresh(completed=True)
         bounds = dict(briefing_at=latest["finished_at"], new_since=latest["started_at"]) if latest else {}
+        bounds.update(refreshed=self.store.refresh_times(), late_hours=self.late_hours,
+                      thresholds=self.thresholds())
         value = project(materials, judgments, preferences, interactions, membership=membership, **bounds)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
         saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
                              interactions, membership=membership, **bounds)
         value["last_refresh"] = latest
         value["saved_events"] = [e for e in saved_view["events"] if e["saved"]]
-        follows = self.store.follows()
+        follows = self.store.follows(user)
         assessments = {f["plan_hash"]: self.store.intent_assessments(f["plan_hash"])
                        for f in follows if f.get("intent_plan")}
         value["follows"] = project_follows(follows, value["events"], materials, assessments)
@@ -102,21 +118,38 @@ class ContentService:
                            failure={k: failure[k] for k in ("code", "attempts", "retry_at")})
         value["counts"].update(pending=sum(r["status"] in {"pending", "retrying"} for r in value["archive"]),
                                failed=sum(r["status"] == "failed" for r in value["archive"]))
-        self._projection = (revision, time.monotonic(), value)
+        self._projection.pop(user, None)
+        while len(self._projection) >= PROJECTION_CACHE:
+            self._projection.pop(next(iter(self._projection)))  # oldest reader first
+        self._projection[user] = (revision, time.monotonic(), value)
         return value
 
-    def view(self):
-        value = dict(self.projection())
+    def visible_run(self, run, user):
+        """A run as `user` may see it: their own in full; someone else's only as "busy"."""
+        if run is None or run.get("user_id", user) == user:
+            return run
+        if run["kind"] == "refresh":  # shared content: everyone may follow its progress
+            return {k: v for k, v in run.items() if k != "user_id"}
+        return {**{k: run.get(k) for k in SHARED_RUN_FIELDS}, "kind": "other", "errors": [],
+                "snapshot_id": None}
+
+    def view(self, user=LOCAL_USER):
+        value = dict(self.projection(user))
         value["search_sources"] = [{"id": key, **meta, "access": source_access(key, self.settings)} for key, meta in SEARCH_SOURCES.items()]
         value["usage"] = self.model_usage()
         value.update(sources=self.source_list(),
-                     model_configured=self.analyzer.configured, run=self.run, queue=self.queued(),
+                     model_configured=self.analyzer.configured, run=self.visible_run(self.run, user),
+                     queue=[self.visible_run(r, user) for r in self.queued()],
                      policy=POLICY_HASH,
-                     last_visit=self.store.last_visit())
+                     last_visit=self.store.last_visit(user))
         _, upcoming = refresh_slots(datetime.now(timezone.utc), self.zone())
         value["schedule"] = {"enabled": value["preferences"]["auto_refresh"], "hours": list(REFRESH_HOURS),
                              "next": upcoming.astimezone(timezone.utc).isoformat()}
         return value
+
+    def thresholds(self):
+        return {"official": getattr(self.settings, "reader_threshold_official", 9),
+                "other": getattr(self.settings, "reader_threshold_other", 9)}
 
     def zone(self):
         name = getattr(self.settings, "reader_timezone", "")
@@ -137,11 +170,11 @@ class ContentService:
             return None
         return self.start(RefreshRequest(), manual=False)
 
-    def weekly_report(self, kind="recent"):
+    def weekly_report(self, kind="recent", user=LOCAL_USER):
         zone = self.zone()
         clock = datetime.now(timezone.utc)
         start, end = report_range(kind, clock, zone)
-        value = self.projection()
+        value = self.projection(user)
         events = {e["id"]: e for e in value["events"]}
         for event in value.get("saved_events", []):
             events.setdefault(event["id"], event)
@@ -152,9 +185,7 @@ class ContentService:
         target = self.settings.publish_path(out_dir)
         if target is None:
             raise ValueError("未设置公开日报目录（READER_PUBLISH_DIR 或 --out）")
-        self.assign_events()
-        events = project(self.store.materials(), self.store.judgments(), Preferences(),
-                         membership=self.membership())["events"]
+        events = self.neutral_events()
         return publish(events, target, clock=clock, zone=self.zone(),
                        base_url=getattr(self.settings, "reader_public_url", ""))
 
@@ -204,46 +235,47 @@ class ContentService:
         return [{**a, "event_id": membership.get(version_ids.get(a["version"]), a["event_id"])}
                 for a in interactions]
 
-    def record_interaction(self, body):
+    def record_interaction(self, body, user=LOCAL_USER):
         if body.kind != "retract":
             revision = self.assign_events()  # read once: this runs for every card shown
             if self.event_of(body.version, revision) != self.resolve(body.event_id, revision):
                 raise LookupError("内容版本不存在，请重新读取")
-        created = self.store.interact(body)
+        created = self.store.interact(body, user)
         if created and body.kind == "opened":
-            self.know_on_open(body)
-            self.see_in_follows(body.event_id)
+            self.know_on_open(body, user)
+            self.see_in_follows(body.event_id, user)
         return created
 
-    def see_in_follows(self, event_id):
+    def see_in_follows(self, event_id, user=LOCAL_USER):
         """Reading a story clears it from every topic's "new" count (user request, 2026-11-12).
 
         All of the event's current versions count as seen; a later report or correction
         makes it new again, as with "mark all as read". Uses the projection the page was
         built from when there is one: opening a story should not recompute the briefing.
         """
-        value = self._projection[2] or self.projection()
+        cached = self._projection.get(user)
+        value = cached[2] if cached else self.projection(user)
         event_id = self.resolve(event_id)
         event = next((e for e in value["events"] if e["id"] == event_id), None)
         if not event:
             return
         versions = {row["version"] for row in event["timeline"]}
-        stored = {f["id"]: f for f in self.store.follows()}
+        stored = {f["id"]: f for f in self.store.follows(user)}
         for follow in value["follows"]:
             if event_id in follow["unread_ids"] and follow["id"] in stored:
                 seen = set(stored[follow["id"]].get("seen_versions", [])) | versions
-                self.store.update_follow(follow["id"], seen_versions=sorted(seen))
+                self.store.update_follow(follow["id"], user=user, seen_versions=sorted(seen))
 
-    def know_on_open(self, opened):
+    def know_on_open(self, opened, user=LOCAL_USER):
         """Opening a story marks this version known, once (user request, 2026-11-11).
 
         Any earlier "known" for the version, even one the reader took back, stops it: after
         "mark as not known", reopening the story leaves that choice alone.
         """
-        if any(a["version"] == opened.version for a in self.store.interactions(["known"])):
+        if any(a["version"] == opened.version for a in self.store.interactions(["known"], user=user)):
             return
         self.store.interact(Interaction(request_id="auto-known-" + digest(opened.request_id)[:24],
-                                        event_id=opened.event_id, version=opened.version, kind="known"))
+                                        event_id=opened.event_id, version=opened.version, kind="known"), user)
 
     def resolve(self, event_id, revision=None):
         return resolve(event_id, self.store.event_state(revision)[2])
@@ -295,9 +327,69 @@ class ContentService:
         self.store.regroup({"kind": "merge", "event": source, "into": target, "materials": moving},
                            moving, target, alias=source)
 
-    def snapshot_view(self, run=None):
+    def neutral_events(self):
+        """Events under default preferences and no reader actions: shared, not personal."""
+        self.assign_events()
+        return project(self.store.materials(), self.store.judgments(), Preferences(),
+                       membership=self.membership(), refreshed=self.store.refresh_times(),
+                       late_hours=self.late_hours, thresholds=self.thresholds())["events"]
+
+    async def relate_events(self, run, limit=None):
+        """Ask the model how similar recent events relate; merge same occurrences and follow-ups.
+
+        Candidates come from relate.candidates (free); each answer is stored, so a pair is never
+        asked twice. A model failure stops this step only; the update itself carries on.
+        """
+        limit = getattr(self.settings, "reader_relation_pairs", 24) if limit is None else limit
+        if not limit or not self.analyzer.configured:
+            return
+        events = await asyncio.to_thread(self.neutral_events)
+        pairs = relation_candidates(events, self.store.relation_pairs(), clock=datetime.now(timezone.utc), limit=limit)
+        checked = merged = 0
+        for start in range(0, len(pairs), BATCH):
+            batch = pairs[start:start + BATCH]
+            ids = [pair_id(older, newer) for _, older, newer in batch]
+            try:
+                answers = await self.analyzer.request_json(
+                    RELATION_PROMPT, relation_payload(batch), relation_validator(ids),
+                    purpose="event_relation", maximum=1800)
+            except ValueError as error:
+                run["errors"].append("relation_" + str(error).removeprefix("intent_"))
+                break
+            rows = []
+            for score, older, newer in batch:
+                answer = answers[pair_id(older, newer)]
+                outcome = None
+                if answer.relation in MERGING:
+                    outcome = await asyncio.to_thread(self.merge_by_model, older["id"], newer["id"], answer)
+                    merged += outcome == "merged"
+                rows.append((older["id"], newer["id"], answer.relation,
+                             {"reason": answer.reason, "recall": score, "outcome": outcome,
+                              "model": getattr(self.settings, "llm_model", "")}))
+                checked += 1
+            self.store.record_relations(rows)
+        run["relations"] = {"checked": checked, "merged": merged}
+
+    def merge_by_model(self, target, source, answer):
+        """Fold the newer event into the older one, unless a reader split either of them."""
+        self.assign_events()
+        target, source = self.resolve(target), self.resolve(source)
+        _, live, _ = self.store.event_state()
+        if target == source or target not in live or source not in live:
+            return "already_together"
+        membership = self.membership()
+        involved = {m for m, e in membership.items() if e in {target, source}}
+        if involved & self.store.split_materials():
+            return "kept_reader_split"
+        moving = [m for m, e in membership.items() if e == source]
+        self.store.regroup({"kind": "model_merge", "event": source, "into": target, "materials": moving,
+                            "relation": answer.relation, "reason": answer.reason},
+                           moving, target, alias=source, method="model")
+        return "merged"
+
+    def snapshot_view(self, run=None, user=LOCAL_USER):
         """What a past briefing needs to be re-read: its ranked events, not the whole library."""
-        value = self.view()
+        value = self.view(user)
         shown = set(value["focus"]) | set(value["radar"])
         titles = {e["id"]: e["title"] for e in value["events"]}
         return {**value, "events": [e for e in value["events"] if e["id"] in shown],
@@ -327,16 +419,18 @@ class ContentService:
                 "request_limit": self.analyzer.requests_per_day,
                 "token_limit": self.analyzer.tokens_per_day}
 
-    def start_discovery(self, request):
-        run = self.new_run("discovery", "discovering", query=request.query, channels=request.channels)
+    def start_discovery(self, request, user=LOCAL_USER):
+        run = self.new_run("discovery", "discovering", query=request.query, channels=request.channels,
+                           user_id=user)
         return self.submit(run, lambda run: self.discover(request.query, run))
 
     async def discover(self, query, run):
+        user = run.get("user_id", LOCAL_USER)
         try:
             related = []
             intent_follow = None
             if run.get("follow_id"):
-                follow = next(f for f in self.store.follows() if f["id"] == run["follow_id"])
+                follow = next(f for f in self.store.follows(user) if f["id"] == run["follow_id"])
                 plan = follow.get("intent_plan")
                 intent_follow = follow if plan else None
                 if plan and not follow.get("confirmed_at"):
@@ -360,15 +454,16 @@ class ContentService:
                 found = []
                 for search in selected:
                     found.extend(await discover(self.store, search["query"], limit=3, channels=[search["source"]], settings=self.settings))
-                self.store.update_follow(intent_follow["id"], search_cursor=cursor + len(selected), last_searches=selected)
+                self.store.update_follow(intent_follow["id"], user=user, search_cursor=cursor + len(selected),
+                                         last_searches=selected)
             else:
                 found = await discover(self.store, query, limit=4, channels=run.get("channels"), settings=self.settings)
             found = list({m.version: m for m in related + found}.values())
             run.update(found=len(found), result_versions=[m.version for m in found])
             if run.get("follow_id"):
-                follow = next(f for f in self.store.follows() if f["id"] == run["follow_id"])
+                follow = next(f for f in self.store.follows(user) if f["id"] == run["follow_id"])
                 ids = list(dict.fromkeys([m.id for m in found] + follow.get("material_ids", [])))[:200]
-                self.store.update_follow(follow["id"], material_ids=ids)
+                self.store.update_follow(follow["id"], user=user, material_ids=ids)
             states = self.store.source_states()
             checked = {s["source"] + "-discovery" for s in run.get("searches", [])} if intent_follow else {s + "-discovery" for s in run.get("channels", ["web", "arxiv", "github"])}
             if any(states.get(key, {}).get("status") == "error" for key in checked):
@@ -379,7 +474,7 @@ class ContentService:
                                                 self.store.intent_assessments(intent_follow["plan_hash"]),
                                                 self.store.judgments())
                 ids = list(dict.fromkeys([m.id for m in candidates] + ids))[:200]
-                self.store.update_follow(intent_follow["id"], material_ids=ids)
+                self.store.update_follow(intent_follow["id"], user=user, material_ids=ids)
             await self.analyze(candidates, run, getattr(self.settings, "reader_follow_analyze_limit", 6))
             if intent_follow:
                 judgments = self.store.judgments()
@@ -394,9 +489,9 @@ class ContentService:
                     except ValueError as error:
                         run["errors"].append(str(error))
             # Build the snapshot first: a cancel while it is prepared publishes nothing.
-            snapshot = await asyncio.to_thread(self.snapshot_view, run)
+            snapshot = await asyncio.to_thread(self.snapshot_view, run, user)
             run.update(state="completed", finished_at=now())
-            run["snapshot_id"] = self.store.snapshot(snapshot)
+            run["snapshot_id"] = self.store.snapshot(snapshot, user)
         except asyncio.CancelledError:
             run.update(state="cancelled", finished_at=now())
         except Exception as error:
@@ -408,7 +503,7 @@ class ContentService:
                 status = "ok" if run["state"] == "completed" and not run["failed"] and not run["errors"] else "partial"
                 if run["state"] in {"cancelled", "failed"}:
                     status = run["state"]
-                self.store.update_follow(run["follow_id"], last_checked=now(), last_status=status,
+                self.store.update_follow(run["follow_id"], user=user, last_checked=now(), last_status=status,
                                          last_found=run.get("found", 0), last_errors=run["errors"])
 
     def pending_judgments(self, materials, limit):
@@ -504,15 +599,19 @@ class ContentService:
         if run["state"] in {"running", "queued"}:
             run.update(state="cancelled", finished_at=now())
             if run.get("follow_id"):
-                self.store.update_follow(run["follow_id"], last_status="cancelled")
+                try:
+                    self.store.update_follow(run["follow_id"], user=run.get("user_id", LOCAL_USER),
+                                             last_status="cancelled")
+                except ValueError:
+                    pass  # the topic was removed meanwhile
 
-    def start_follow(self, key, manual=True):
-        follow = next((f for f in self.store.follows() if f["id"] == key), None)
+    def start_follow(self, key, manual=True, user=LOCAL_USER):
+        follow = next((f for f in self.store.follows(user) if f["id"] == key), None)
         if not follow or not follow["active"]:
             raise ValueError("请先启用这个话题的追踪")
         if not follow.get("intent_plan") or not follow.get("confirmed_at"):
             raise ValueError("请先描述需求并确认追踪方案")
-        existing = self.pending(lambda run: run.get("follow_id") == key)
+        existing = self.pending(lambda run: run.get("follow_id") == key and run.get("user_id") == user)
         if existing:
             if manual and existing["state"] == "queued" and not existing["manual"]:
                 # Asked for now: move the scheduled check up with the other manual work.
@@ -522,33 +621,34 @@ class ContentService:
             return existing
 
         async def job(run):
-            self.store.update_follow(key, last_checked=now(), last_status="checking")
+            self.store.update_follow(key, user=user, last_checked=now(), last_status="checking")
             await self.discover(follow["query"], run)
         run = self.submit(self.new_run("following", "discovering", follow_id=key, query=follow["query"],
-                                       follow_name=follow["name"]), job, manual=manual)
+                                       follow_name=follow["name"], user_id=user), job, manual=manual)
         if run["state"] == "queued":
-            self.store.update_follow(key, last_status="queued")
+            self.store.update_follow(key, user=user, last_status="queued")
         return run
 
     def start_tracking(self):
-        for follow in self.store.follows():
+        for follow in self.store.all_follows():
+            owner = follow["user_id"]
             if follow["active"] and not follow.get("intent_plan"):
-                self.store.update_follow(follow["id"], active=False, last_status="needs_intent")
+                self.store.update_follow(follow["id"], user=owner, active=False, last_status="needs_intent")
             elif follow.get("last_status") in {"queued", "checking"}:
                 # The queue lives in memory: a check queued or running before a restart is gone.
-                self.store.update_follow(follow["id"], last_status="cancelled")
+                self.store.update_follow(follow["id"], user=owner, last_status="cancelled")
         if not self.tracker or self.tracker.done():
             self.tracker = asyncio.create_task(self.tracking_loop())
 
     def track_due(self):
         clock = stamp(now())
-        due = [f for f in self.store.follows() if f["active"] and f.get("intent_plan") and f.get("confirmed_at") and
+        due = [f for f in self.store.all_follows() if f["active"] and f.get("intent_plan") and f.get("confirmed_at") and
                (not f.get("last_checked") or (clock - stamp(f["last_checked"])).total_seconds() >=
                 f.get("intent_plan", {}).get("interval_minutes", 30) * 60)]
         for follow in sorted(due, key=lambda f: f.get("last_checked") or ""):
             if len(self.queue) >= QUEUE_LIMIT:
                 break
-            self.start_follow(follow["id"], manual=False)
+            self.start_follow(follow["id"], manual=False, user=follow["user_id"])
 
     async def tracking_loop(self):
         while True:
@@ -562,11 +662,12 @@ class ContentService:
             except Exception as error:
                 logging.getLogger(__name__).warning("Topic tracking check failed: %s", type(error).__name__)
 
-    def start(self, request, manual=True):
+    def start(self, request, manual=True, user=None):
         existing = self.pending(lambda run: run["kind"] == "refresh")
         if existing:
             return existing
-        run = self.new_run("refresh", "collecting", trigger="manual" if manual else "scheduled")
+        run = self.new_run("refresh", "collecting", trigger="manual" if manual else "scheduled",
+                           **({"user_id": user} if user else {}))
         return self.submit(run, lambda run: self.refresh(request, run), manual=manual)
 
     async def refresh(self, request, run):
@@ -582,11 +683,22 @@ class ContentService:
             candidates = await asyncio.to_thread(self.store.materials)
             candidates.sort(key=lambda m: m.published_at or m.captured_at, reverse=True)
             await self.analyze(candidates, run, request.analyze_limit)
+            run["stage"] = "grouping"
+            await self.relate_events(run)
             run["stage"] = "publishing"
-            snapshot = await asyncio.to_thread(self.snapshot_view, run)
+            # Shared content, personal briefings: save one for each recently active reader.
+            since = (datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_ACTIVE_DAYS)).isoformat()
+            starter = run.get("user_id") or LOCAL_USER
+            readers = list(dict.fromkeys([starter, *self.store.active_users(since)]))[:SNAPSHOT_READERS]
+            snapshots = {}
+            for reader in readers:
+                snapshots[reader] = await asyncio.to_thread(self.snapshot_view, run, reader)
             run["state"] = "completed"
             run["finished_at"] = now()
-            run["snapshot_id"] = self.store.snapshot(snapshot)
+            for reader, snapshot in snapshots.items():
+                key = self.store.snapshot(snapshot, reader)
+                if reader == starter:
+                    run["snapshot_id"] = key
             if self.settings.publish_path():
                 # A failed public write never fails the reader's own update.
                 try:
@@ -603,17 +715,26 @@ class ContentService:
         finally:
             self.store.record_refresh(run)
 
-    async def cancel(self, run_id=None):
+    @staticmethod
+    def may_cancel(run, owner):
+        """owner None: any run (admin, internal). Otherwise only runs that reader started."""
+        return owner is None or run.get("user_id") == owner
+
+    async def cancel(self, run_id=None, owner=None):
         """Stop the running job (default) or drop a queued one; the queue then moves on."""
         if run_id and run_id != (self.run or {}).get("id"):
             for index, (run, _) in enumerate(self.queue):
                 if run["id"] == run_id:
+                    if not self.may_cancel(run, owner):
+                        raise PermissionError("只能取消自己发起的任务")
                     self.queue.pop(index)
                     self.mark_cancelled(run)
                     return run
             raise LookupError("这个任务已经结束或不存在")
         if self.busy():
             task, run = self.task, self.run
+            if not self.may_cancel(run, owner):
+                raise PermissionError("只能取消自己发起的任务")
             task.cancel()
             try:
                 await task
@@ -626,14 +747,16 @@ class ContentService:
             return run
         return self.run
 
-    async def cancel_follow(self, key):
+    async def cancel_follow(self, key, user=LOCAL_USER):
         """Drop queued checks of a topic and stop its running one; True when anything stopped."""
+        def mine(run):
+            return run.get("follow_id") == key and run.get("user_id", LOCAL_USER) == user
         stopped = False
         for run, _ in list(self.queue):
-            if run.get("follow_id") == key:
+            if mine(run):
                 await self.cancel(run["id"])
                 stopped = True
-        if self.busy() and self.run.get("follow_id") == key:
+        if self.busy() and mine(self.run):
             await self.cancel()
             stopped = True
         return stopped

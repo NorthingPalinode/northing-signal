@@ -61,19 +61,23 @@ test("news is newest first within each section and respects filters", () => {
   const events = [earlier, undated, latest, later];
   const value = view(events, { focus: ["a", "c"], radar: ["d", "b"], saved_events: [earlier, later] });
   const all = sections(value, "", "", "");
-  assert.deepEqual(all.focus.map((e) => e.id), ["c", "a"]);
+  // Undated stories follow dated ones: collection time does not make them news (Kimi K3, 2026-11-23).
+  assert.deepEqual(all.focus.map((e) => e.id), ["a", "c"]);
   assert.deepEqual(all.radar.map((e) => e.id), ["b", "d"]);
-  assert.deepEqual(all.discover.map((e) => e.id), ["b", "c", "a", "d"]);
-  assert.deepEqual(all.saved.map((e) => e.id), ["c", "a"]);
+  assert.deepEqual(all.discover.map((e) => e.id), ["b", "a", "c", "d"]);
+  assert.deepEqual(all.saved.map((e) => e.id), ["a", "c"]);
   assert.deepEqual(value.events.map((e) => e.id), ["a", "d", "b", "c"]);
   assert.deepEqual(sections(value, "agents", "", "").focus, []);
   assert.deepEqual(sections(value, "", "ATLAS C", "").focus.map((e) => e.id), ["c"]);
 });
 
 test("more lists qualified stories outside focus and radar", () => {
-  const events = [story("a"), story("b"), story("c"), story("d", { qualified: false }), story("e", { dismissed: true })];
+  const events = [story("a"), story("b"), story("c"), story("d", { qualified: false }), story("e", { dismissed: true }),
+    story("f", { timely: false, stale_reason: "late" })];
   const value = view(events, { focus: ["a"], radar: ["b"] });
   assert.deepEqual(sections(value, "", "", "").more.map((e) => e.id), ["c"]);
+  // A late find stays searchable (Kimi K3, 2026-11-24).
+  assert.ok(sections(value, "", "", "").discover.some((e) => e.id === "f"));
 });
 
 test("discover hides unqualified and dismissed stories", () => {
@@ -150,7 +154,7 @@ test("invalid dates are labelled instead of rendered", () => {
   assert.equal(when("not a date"), "时间未确认");
   assert.notEqual(when("2026-11-01T08:00:00Z"), "时间未确认");
   const captured = "2026-11-01T08:00:00Z";
-  assert.equal(when(null, captured), `收录于 ${when(captured)}`);
+  assert.equal(when(null, captured), `发布时间未知，收录于 ${when(captured)}`);
 });
 
 test("queued jobs and failed materials have readable labels", () => {

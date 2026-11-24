@@ -3,6 +3,7 @@ import { searchSources, sourceName, type SearchSource } from "./searchSources";
 import FollowIntentForm, { intervalLabel } from "./FollowIntentForm";
 import StoryReader, { DetailActions, FeedbackChoices } from "./StoryDetail";
 import { Glyph, Sheet, Toast } from "./ui";
+import { accountLabel, auth, quotaLabel, signedOut } from "./auth";
 import brandMark from "./assets/brand.svg?no-inline";
 
 import {
@@ -47,6 +48,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: { "Content-Type": "application/json", ...options.headers },
   });
   const value = await response.json().catch(() => ({}));
+  if (response.status === 401) signedOut();
   if (!response.ok)
     throw new Error(
       typeof value.detail === "string" ? value.detail : "暂时无法完成，请重试。",
@@ -179,6 +181,11 @@ function StoryRow({
           )}
           {story.protected && (
             <span className="r-badge warn">重要{actionLabel[story.action]}</span>
+          )}
+          {story.heat_trend === "rising" && (
+            <span className="r-badge accent" title="最近 6 小时有新的来源开始报道">
+              热度上升
+            </span>
           )}
           <span className="r-meta-text">
             {[
@@ -391,6 +398,7 @@ export default function ReaderApp() {
   const [feedback, setFeedback] = useState<Story | null>(null);
   const [settings, setSettings] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [selectedFollow, setSelectedFollow] = useState("");
@@ -427,6 +435,7 @@ export default function ReaderApp() {
     [],
   );
   const fail = useCallback((e: unknown) => setError((e as Error).message), []);
+  const isAdmin = view?.account ? view.account.role === "admin" : true;
 
   const load = useCallback(async () => {
     const result = await request<View>("");
@@ -959,6 +968,18 @@ export default function ReaderApp() {
         <Glyph name="settings" size={18} />
         <span>阅读偏好</span>
       </button>
+      {view?.account?.auth === "token" && (
+        <button
+          onClick={() => {
+            setMenuOpen(false);
+            setAccountOpen(true);
+          }}
+        >
+          <Glyph name="follow" size={18} />
+          <span>账号</span>
+          <small>{view.account.role === "admin" ? "管理员" : ""}</small>
+        </button>
+      )}
     </>
   );
 
@@ -1639,7 +1660,7 @@ export default function ReaderApp() {
                       ? "线索 · 正文待获取"
                       : statusLabel[row.status] || row.status}
                   </span>
-                  {row.status === "failed" && !historical && (
+                  {row.status === "failed" && !historical && isAdmin && (
                     <button className="r-link small" onClick={() => void retry(row.version)}>
                       重新整理
                     </button>
@@ -1682,6 +1703,7 @@ export default function ReaderApp() {
         askFeedback={() => setFeedback(story)}
         undo={(a) => void undo(story, a)}
         regroup={(path, body, done) => void regroup(story, path, body, done)}
+        canRegroup={isAdmin}
         loadRaw={() =>
           request<{
             title: string;
@@ -2178,6 +2200,34 @@ export default function ReaderApp() {
       {menuOpen && (
         <Sheet title="更多" close={() => setMenuOpen(false)}>
           <div className="r-menu">{secondaryNav}</div>
+        </Sheet>
+      )}
+
+      {accountOpen && view?.account && (
+        <Sheet title="账号" close={() => setAccountOpen(false)}>
+          <p className="r-sheet-lead">
+            {accountLabel(view.account)}
+            <br />
+            你的收藏、反馈、追踪话题和阅读偏好都保存在这个令牌对应的账号里。在其他设备上用同一个令牌登录即可看到。
+          </p>
+          <ul className="r-account-facts">
+            {quotaLabel(view.account) && <li>{quotaLabel(view.account)}</li>}
+            <li>
+              追踪话题：{view.follows?.length || 0} / {view.account.limits.follows}
+            </li>
+            {view.account.role === "admin" && <li>管理员可以拆分与合并事件、重新整理失败的材料，这些修改对所有读者生效。</li>}
+          </ul>
+          <button
+            className="r-button block"
+            onClick={() =>
+              void auth("/logout", "POST")
+                .then(() => signedOut())
+                .catch(fail)
+            }
+          >
+            退出登录
+          </button>
+          <p className="r-sheet-lead">退出前请确认已保存令牌：令牌无法找回。</p>
         </Sheet>
       )}
 

@@ -17,7 +17,7 @@ from northing_signal.briefing.understand import Analyzer, grounded, validate, va
 
 def settings(**changes):
     """Complete synthetic provider settings; tests never depend on the owner's .env."""
-    values = dict(llm_mode="baseline", llm_base_url="https://example.org/v1",
+    values = dict(llm_mode="baseline", llm_base_url="https://example.org/v1", reader_auth="off",
                   llm_model="synthetic", llm_api_key="synthetic-key")
     return Settings(_env_file=None, **{**values, **changes})
 
@@ -194,7 +194,7 @@ def test_budget_stops_before_external_request(tmp_path):
 def test_unlimited_defaults_continue_past_previous_daily_limits(tmp_path):
     from fastapi.testclient import TestClient
     from northing_signal.briefing.settings import ReaderSettings
-    settings = ReaderSettings(_env_file=None)
+    settings = ReaderSettings(_env_file=None, reader_auth="off")
     assert settings.reader_requests_per_day is None and settings.reader_tokens_per_day is None
     store = Store(tmp_path / "unlimited.db")
     service_app = create_app(settings, store)
