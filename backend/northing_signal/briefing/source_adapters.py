@@ -96,31 +96,75 @@ def publisher_links(source, body, limit):
     return sorted(output.values(), key=lambda m: m.published_at or "", reverse=True)[:limit]
 
 
-def changelog(source, body, limit):
-    tree = page_tree(body)
+DATE = re.compile(r"(?<!\d)(20\d{2})[-/](\d{1,2})[-/](\d{1,2})(?!\d)")  # text may follow at once
+
+
+def dated(value):
+    """(normalised YYYY-MM-DD, ISO timestamp) of the first date in `value`, or None."""
+    match = DATE.search(value or "")
+    if not match:
+        return None
+    try:
+        day = datetime(*(int(p) for p in match.groups()), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return day.strftime("%Y-%m-%d"), day.isoformat()
+
+
+def day_materials(source, days, limit):
+    """One material per day, newest page order kept; sections of the same day are joined."""
+    joined = {}
+    for key, date, excerpt in days:
+        if key in joined:
+            joined[key] = (date, joined[key][1] + "\n" + excerpt)
+        else:
+            joined[key] = (date, excerpt)
     output = []
-    for heading in tree.xpath("//h2"):
-        match = re.search(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b", heading.text_content())
-        if not match:
-            continue
-        try:
-            date = datetime(*(int(p) for p in match.groups()), tzinfo=timezone.utc).isoformat()
-        except ValueError:
-            continue
-        sections = [clean(heading.text_content())]
-        next_node = heading.getnext()
-        while next_node is not None and next_node.tag not in {"h1", "h2"}:
-            sections.append(clean(next_node.text_content()))
-            next_node = next_node.getnext()
-        excerpt = "\n".join(s for s in sections if s)[:6000]
+    for key, (date, excerpt) in joined.items():
+        excerpt = excerpt[:6000]
         if len(excerpt) < 100:
             continue
-        title = source["name"] + " · " + match.group()
-        output.append(material(source, title, source["url"], excerpt, kind="publisher_excerpt",
-                               date=date, identity=match.group(), discovery_url=source["url"]))
+        output.append(material(source, source["name"] + " · " + key, source["url"], excerpt,
+                               kind="publisher_excerpt", date=date, identity=key, discovery_url=source["url"]))
         if len(output) >= limit:
             break
     return output
+
+
+def changelog(source, body, limit):
+    """Sections headed by a date. `heading` (default h2) names the dated heading level; a
+    section runs to the next heading of that level or above."""
+    tree = page_tree(body)
+    level = source.get("heading", "h2")
+    stops = {f"h{n}" for n in range(1, int(level[1]) + 1)}
+    days = []
+    for heading in tree.xpath("//" + level):
+        found = dated(heading.text_content())
+        if not found:
+            continue
+        sections = [clean(heading.text_content())]
+        next_node = heading.getnext()
+        while next_node is not None and next_node.tag not in stops:
+            sections.append(clean(next_node.text_content()))
+            next_node = next_node.getnext()
+        days.append((*found, "\n".join(s for s in sections if s)))
+    return day_materials(source, days, limit)
+
+
+def updates(source, body, limit):
+    """Documentation changelogs built from one block per release: Mintlify `<div class="update"
+    id="2026-08-26">` (Zhipu / Z.ai), Alibaba Cloud `<div class="rkb-update">` with the date at
+    its start. `block` names the block's class (default "update"); dated by its id, else by
+    the first date in its opening text."""
+    tree = page_tree(body)
+    name = source.get("block", "update")
+    days = []
+    for block in tree.xpath(f"//div[contains(concat(' ', normalize-space(@class), ' '), ' {name} ')]"):
+        text = clean(block.text_content())
+        found = dated(block.get("id")) or dated(text[:40])
+        if found:
+            days.append((*found, text))
+    return day_materials(source, days, limit)
 
 
 def document(source, body, limit):
@@ -285,7 +329,7 @@ async def hub_models(source, body, limit, fetch):
 
 
 def parse_index(source, body, limit):
-    return {"publisher_index": publisher_links, "changelog": changelog,
+    return {"publisher_index": publisher_links, "changelog": changelog, "updates": updates,
             "daily_papers": daily_papers, "openreview": openreview,
             "document": document, "markdown": markdown, "arena": arena,
             "swebench": swebench, "modelscope_models": modelscope_models}[source["kind"]](source, body, limit)

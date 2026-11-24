@@ -10,6 +10,22 @@
 - 原材料、版本及用量均位于 `.tmp/source-expansion/` 的隔离验证库；没有调用内容模型，没有向个人库写入探测文章，也没有新建关注或通知。采集成功不等于推荐质量、事件召回或摘要语义已经验证。
 - 本轮实网使用当前环境的正常 HTTPS 代理；保留公网地址检查、原域名 TLS/Host、允许跳转及响应大小限制。直连环境下部分境外站点失败，换环境需重新检查，不能把本次成功当连续可用承诺。
 
+## 2026-11-24 公司官方来源补充
+
+为「公司动向」按官方来源归类（[计划](plans/LENSES_PLAN.md)），新增 10 个入口，固定来源共 61 个。逐源用项目自己的抓取与解析实测（只读，不写个人库、不调用模型），每源取得 3–5 条带日期的材料：
+
+| 公司 | 新入口 | 接入方式与边界 |
+|---|---|---|
+| Google | [Google · AI 官方博客](https://blog.google/technology/ai/rss/) | RSS 摘要；Gemini 应用、模型与产品发布。Google Developers Blog 的条目没有日期，接入会被当作旧闻，未接 |
+| Microsoft | [新闻中心](https://news.microsoft.com/source/feed/)、[Azure 博客](https://azure.microsoft.com/en-us/blog/feed/) | RSS；新闻中心含 Microsoft AI（MAI）模型发布。`blogs.microsoft.com/ai/feed/` 返回 410 |
+| Apple | [机器学习研究](https://machinelearning.apple.com/rss.xml)、[新闻室](https://www.apple.com/newsroom/rss-feed.rss) | RSS；新闻室为综合频道 |
+| Amazon | [About Amazon](https://www.aboutamazon.com/news/rss)、[AWS 机器学习博客](https://aws.amazon.com/blogs/machine-learning/feed/) | RSS；AWS 博客含大量使用教程 |
+| NVIDIA | [新闻稿](https://nvidianews.nvidia.com/releases.xml) | RSS；与原有 NVIDIA 博客部分重复 |
+| 阿里 / Qwen | [阿里云百炼 · 模型发布与更新](https://www.alibabacloud.com/help/en/model-studio/newly-released-models) | 官方更新记录按日期拆分（`updates`，`block: rkb-update`），同日多节合并；含平台上架的第三方模型。`qwenlm.github.io` 博客最后更新于 2025-09，Qwen 官网仍为动态页面 |
+| 智谱 | [模型与产品发布记录](https://docs.bigmodel.cn/cn/update/new-releases) | 官方文档更新区块按日期拆分（`updates`）。`z.ai/blog` 与其 RSS 返回 404 |
+
+综合频道（Microsoft 新闻中心、Azure、Apple 新闻室、About Amazon）设置 `require` 关键词规则：标题与摘要不含 AI 相关词的条目在采集时丢弃，不占用模型整理额度。关键词规则可能漏掉措辞特殊的 AI 新闻。
+
 ## 按重要性排列的未完成项
 
 | 优先级 | 来源 / 尚缺能力 | 实际限制或观察 | 当前替代与后续条件 |

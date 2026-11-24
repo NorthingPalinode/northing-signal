@@ -210,3 +210,32 @@ def test_every_model_catalog_is_told_a_card_is_not_a_launch():
     assert not is_model_card(fixture(source_id="hf-daily-papers")) and not is_model_card(fixture(source_id="openai"))
     # The title rules that keep explainers, past launches and model cards from reading as releases.
     assert "不改写成发布" in PROMPT and "本身不证明刚发布" in PROMPT
+
+
+def test_update_blocks_are_split_by_day_and_same_day_blocks_join():
+    """Zhipu (Mintlify ids) and Alibaba Cloud Model Studio (date at the block's start)."""
+    text = b"A new flagship model is available with stated conditions. " * 3
+    mintlify = (b'<main><div class="update flex" id="2026-8-19"><p>' + text + b'</p></div>'
+                b'<div class="update" id="2026-06-16"><p>' + text + b'</p></div>'
+                b'<div class="update" id="notes"><p>' + text + b'</p></div></main>')
+    rows = parse(source("updates"), mintlify, 5)
+    assert [r.published_at[:10] for r in rows] == ["2026-08-19", "2026-06-16"]
+    assert rows[0].title == "Fixture · 2026-08-19" and rows[0].content_kind == "publisher_excerpt"
+    alibaba = (b'<div class="rkb-update"><div class="rkb-update-meta"><h3>2026-11-16</h3></div>'
+               b'<div class="rkb-update-body">qwen4-max ' + text + b'</div></div>'
+               b'<div class="rkb-update"><div class="rkb-update-meta"><h3>2026-11-16</h3></div>'
+               b'<div class="rkb-update-body">mindlab/macaron ' + text + b'</div></div>')
+    joined = parse(source("updates", block="rkb-update"), alibaba, 5)
+    assert len(joined) == 1 and "qwen4-max" in joined[0].text and "mindlab/macaron" in joined[0].text
+
+
+def test_general_newsrooms_keep_only_ai_entries():
+    feed = (b'<rss><channel>'
+            b'<item><title>Formula 1 streams live this weekend</title><link>https://example.org/news/f1</link>'
+            b'<description>Racing on TV.</description><pubDate>Mon, 23 Nov 2026 10:00:00 GMT</pubDate></item>'
+            b'<item><title>Siri AI comes to more languages</title><link>https://example.org/news/siri</link>'
+            b'<description>Assistant update.</description><pubDate>Mon, 23 Nov 2026 11:00:00 GMT</pubDate></item>'
+            b'</channel></rss>')
+    rows = parse(source("rss", require=r"(?i)\b(AI|Siri)\b"), feed, 5)
+    assert [r.url for r in rows] == ["https://example.org/news/siri"]
+    assert len(parse(source("rss"), feed, 5)) == 2

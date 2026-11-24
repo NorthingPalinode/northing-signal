@@ -6,7 +6,7 @@
 
 当前采用独立的 Python / React 内容引擎。旧版目标工作台与 G1–G4 研究材料已从主分支移除，保存在 [`archive/research-g1-g4`](https://github.com/NorthingPalinode/northing-signal/tree/archive/research-g1-g4) 分支；旧个人数据库未自动迁移或删除，可以用 `scripts/export_legacy.py` 导出。
 
-当前版本已接入 **45 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
+当前版本已接入 **61 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
 
 ## 可以做什么
 
@@ -87,16 +87,16 @@ python -m northing_signal.briefing publish --out .local/public
 
 ## 信息来源
 
-固定来源池已从 12 个扩展为 51 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
+固定来源池已从 12 个扩展为 61 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
 
 | 固定来源类型 | 数量 | 代表来源与材料 |
 |---|---:|---|
-| 官网发布与更新日志 | 8 | Anthropic、DeepSeek、Kimi、MiniMax、ByteDance Seed、Meta、xAI、Mistral |
+| 官网发布与更新日志 | 10 | Anthropic、DeepSeek、Kimi、MiniMax、ByteDance Seed、Meta、xAI、Mistral、阿里云百炼（Qwen）、智谱 |
 | 开源版本 | 8 | vLLM、SGLang、llama.cpp、Ollama、Transformers、LangGraph、Kimi Code、Claude Code |
 | 模型目录与模型卡 | 10 | 九个 Hugging Face 官方组织，以及 ModelScope 的 Qwen 公开目录 |
 | 论文发现 | 2 | arXiv 分类查询、Hugging Face Daily Papers |
 | 评测数据与项目更新 | 3 | Arena 文本榜、SWE-bench Verified；LiveBench 当前仅更新记录 |
-| RSS / Atom | 20 | OpenAI、Google DeepMind、研究机构、Simon Willison、Interconnects、Latent Space、量子位；科技与商业媒体 The Verge、Ars Technica、CNBC、MIT Technology Review、雷峰网、极客公园等 |
+| RSS / Atom | 28 | OpenAI、Google AI 官方博客、Microsoft 新闻中心与 Azure、Apple、Amazon 与 AWS、NVIDIA 新闻稿、Google DeepMind、研究机构、Simon Willison、Interconnects、Latent Space、量子位；科技与商业媒体 The Verge、Ars Technica、CNBC、MIT Technology Review、雷峰网、极客公园等 |
 
 这些是入口数量，不等于独立发布方数，也不代表完整或持续覆盖。另有以下九类主动检索入口，与固定池另计：
 
