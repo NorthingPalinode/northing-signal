@@ -126,3 +126,17 @@ def test_a_model_failure_stops_grouping_but_not_the_update(tmp_path):
     assert run["errors"] == ["relation_model_request_failed"] and run["relations"] == {"checked": 0, "merged": 0}
     assert store.relation_pairs() == set()  # nothing recorded: asked again next time
     assert Relation(id="p", relation="ROUNDUP").relation == "ROUNDUP"
+
+
+def test_a_story_that_began_long_ago_but_is_still_reported_is_paired():
+    # The Nvidia CEO story began with a scandal 15 days before Jensen Huang returned (2026-11-24).
+    ongoing = event("scandal", source="techcrunch", subject="英伟达", obj="黄仁勋复任CEO", hours=24 * 15,
+                    title="黄仁勋复任英伟达CEO", summary="董事会调查后恢复黄仁勋职务")
+    ongoing["earliest_published_at"] = ago(24 * 15)
+    ongoing["timeline"] = [{"published_at": ago(24 * 15)}, {"published_at": ago(3)}]
+    today = event("ars", source="ars", subject="英伟达董事会", obj="黄仁勋CEO职务", hours=5,
+                  title="英伟达董事会恢复黄仁勋CEO职务", summary="董事会恢复黄仁勋CEO职务")
+    pairs = candidates([ongoing, today], clock=NOW)
+    assert [(older["id"], newer["id"]) for _, older, newer in pairs] == [("scandal", "ars")]
+    ongoing["timeline"] = [{"published_at": ago(24 * 15)}]  # no report since: no longer recent
+    assert candidates([ongoing, today], clock=NOW) == []

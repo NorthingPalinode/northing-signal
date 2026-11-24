@@ -28,7 +28,7 @@ class ReaderSettings(BaseSettings):
     reader_timezone: str = "America/New_York"
     reader_batch_size: int = Field(default=4, ge=1, le=6)
     reader_follow_analyze_limit: int = Field(default=6, ge=1, le=24)
-    reader_model_concurrency: int = Field(default=1, ge=1, le=4)
+    reader_model_concurrency: int = Field(default=2, ge=1, le=4)
     reader_web_api_key: SecretStr = SecretStr("")
     reader_openalex_api_key: SecretStr = SecretStr("")
     reader_x_bearer_token: SecretStr = SecretStr("")

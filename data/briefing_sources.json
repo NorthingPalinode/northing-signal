@@ -1,5 +1,5 @@
 {
-  "revision": "ai-sources-v2",
+  "revision": "ai-sources-v3",
   "note": "Public subscriptions, publisher indexes and bounded structured catalogs. Each refresh observes availability. Listing-only records remain leads; benchmark excerpts are not independent validation. No authenticated/paid source is enabled without project configuration.",
   "sources": [
     {
@@ -546,6 +546,84 @@
       "priority": 1,
       "max_items": 6,
       "description": "短摘要需补读原文；不把搜索、索引或标题当成实测。"
+    },
+    {
+      "id": "theverge-ai",
+      "name": "The Verge · AI",
+      "role": "media",
+      "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+      "hosts": [
+        "www.theverge.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 8,
+      "description": "AI 栏目，含全文。"
+    },
+    {
+      "id": "ars-ai",
+      "name": "Ars Technica · AI",
+      "role": "media",
+      "url": "https://arstechnica.com/ai/feed/",
+      "hosts": [
+        "arstechnica.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 8,
+      "description": "AI 栏目，含全文；混有少量硬件评测。"
+    },
+    {
+      "id": "cnbc-tech",
+      "name": "CNBC · Technology",
+      "role": "media",
+      "url": "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+      "hosts": [
+        "www.cnbc.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 8,
+      "description": "综合科技与商业媒体（2026-11-24 加入，补 AI 产业新闻）：每次最多 8 条，非 AI 内容由整理判为无关。只有摘要，需补读原文。"
+    },
+    {
+      "id": "mittr-ai",
+      "name": "MIT Technology Review · AI",
+      "role": "media",
+      "url": "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+      "hosts": [
+        "www.technologyreview.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 8,
+      "description": "AI 深度报道与评论。"
+    },
+    {
+      "id": "leiphone",
+      "name": "雷峰网",
+      "role": "media",
+      "url": "https://www.leiphone.com/feed",
+      "hosts": [
+        "www.leiphone.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 8,
+      "description": "中文 AI 与科技产业报道，含全文。"
+    },
+    {
+      "id": "geekpark",
+      "name": "极客公园",
+      "role": "media",
+      "url": "https://www.geekpark.net/rss",
+      "hosts": [
+        "www.geekpark.net"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 8,
+      "description": "综合科技与商业媒体（2026-11-24 加入，补 AI 产业新闻）：每次最多 8 条，非 AI 内容由整理判为无关。"
     },
     {
       "id": "arena-text",

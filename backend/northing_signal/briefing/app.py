@@ -271,6 +271,8 @@ def create_app(settings=None, store=None):
 
     @app.post("/api/reader/refresh", status_code=202)
     async def refresh(body: RefreshRequest, user=Depends(current_user)):
+        if limited(user):
+            body = RefreshRequest()  # sizes are the operator's to choose: every update reads all sources
         try:
             return service.visible_run(service.start(body, user=user["id"]), user["id"])
         except ValueError as error:

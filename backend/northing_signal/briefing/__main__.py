@@ -13,13 +13,33 @@ from .store import Store
 
 async def analyze_pending(service, limit, reference=None):
     """Same selection, batching and backoff as an in-app update, without collecting."""
-    candidates = sorted(service.store.materials(), key=lambda m: m.published_at or m.captured_at, reverse=True)
+    candidates = service.triaged()
     if reference:
         versions = {json.loads(line)["version"] for line in reference.read_text("utf-8").splitlines() if line.strip()}
         candidates = [m for m in candidates if m.version in versions]
     run = service.new_run("analyze", "understanding")
     await service.analyze(candidates, run, limit)
     print(json.dumps({k: run.get(k) for k in ("total", "analyzed", "failed", "errors")}, ensure_ascii=False), flush=True)
+
+
+async def rejudge(service, days, limit):
+    """Judge again, under the current prompt, recent materials it would now read differently:
+    those judged unrelated or uncertain (2026-11-24: AI industry news such as Nvidia's CEO
+    change was marked unrelated). Most widely reported and newest first."""
+    from datetime import datetime, timedelta, timezone
+
+    from .engine import stamp
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    judged = service.store.judgments()
+    chosen = [m for m in service.triaged()
+              if judged.get(m.version, {}).get("relevance") in {"unrelated", "uncertain"}
+              and (stamp(m.published_at) or stamp(m.captured_at) or since) > since]
+    run = service.new_run("analyze", "understanding")
+    await service.analyze(chosen, run, limit, again=True)
+    after = service.store.judgments()
+    now_ai = sum(after[m.version].get("relevance") == "ai" for m in chosen[:limit] if m.version in after)
+    print(json.dumps({"candidates": len(chosen), "judged": run["analyzed"], "failed": run["failed"],
+                      "now_ai": now_ai, "errors": run["errors"]}, ensure_ascii=False), flush=True)
 
 
 def label(store, gold, n):
@@ -97,7 +117,7 @@ def run_calibration(store, gold, split, settings):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["collect", "enrich", "analyze", "status", "export", "evaluate", "discover", "recheck", "publish", "token", "users",
-                                            "label", "calibrate", "relate"])
+                                            "label", "calibrate", "relate", "rejudge"])
     parser.add_argument("--limit", type=int, default=24)
     parser.add_argument("--database", default=None)
     parser.add_argument("--reference", type=Path)
@@ -114,6 +134,7 @@ def main():
     parser.add_argument("--gold", type=Path, default=None,
                         help="label/calibrate: your labels (default .local/reader-quality/gold.jsonl)")
     parser.add_argument("--n", type=int, default=120, help="label: how many materials to sample (default 120)")
+    parser.add_argument("--days", type=int, default=14, help="rejudge: how far back to look (default 14)")
     args = parser.parse_args()
     if not 0 <= args.limit <= 120:
         parser.error("limit must be between 0 and 120")
@@ -155,6 +176,9 @@ def main():
             print(material.model_dump_json(), flush=True)
         return
     service = ContentService(store, settings)
+    if args.command == "rejudge":
+        asyncio.run(rejudge(service, args.days, args.limit))
+        return
     if args.command == "relate":
         # Judge up to --limit candidate pairs of recent events now (each update does 24 itself).
         run = service.new_run("relate", "grouping")

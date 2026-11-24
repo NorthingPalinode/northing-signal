@@ -358,16 +358,29 @@ class Store:
                 db.execute("UPDATE event_aliases SET new_id=? WHERE new_id=?", (target, alias))
             db.execute("INSERT INTO event_changes(data, created_at) VALUES (?, ?)", (self.encoded(change), now()))
 
-    def relation_pairs(self):
-        """Every pair of event ids the model has judged, as frozensets."""
+    def relation_pairs(self, recheck=None):
+        """Pairs of event ids the model has judged, as frozensets.
+
+        recheck(relation, details) -> True leaves a pair out, so it may be asked again.
+        """
         with self.connection() as db:
-            return {frozenset((r["a"], r["b"])) for r in db.execute("SELECT a, b FROM event_relations")}
+            rows = db.execute("SELECT a, b, relation, data FROM event_relations").fetchall()
+        return {frozenset((r["a"], r["b"])) for r in rows
+                if not (recheck and recheck(r["relation"], json.loads(r["data"])))}
 
     def record_relations(self, rows):
-        """rows: (event id, event id, relation, details)."""
+        """rows: (event id, event id, relation, details). A pair asked again keeps its earlier
+        answer under details["previous"]."""
         with self.connection() as db:
-            db.executemany("INSERT OR IGNORE INTO event_relations VALUES (?, ?, ?, ?, ?)",
-                           [(*sorted((a, b)), relation, self.encoded(data), now()) for a, b, relation, data in rows])
+            for a, b, relation, data in rows:
+                first, second = sorted((a, b))
+                old = db.execute("SELECT relation, data, created_at FROM event_relations WHERE a=? AND b=?",
+                                 (first, second)).fetchone()
+                if old:
+                    data = {**data, "previous": {"relation": old["relation"], "at": old["created_at"],
+                                                 **json.loads(old["data"])}}
+                db.execute("INSERT OR REPLACE INTO event_relations VALUES (?, ?, ?, ?, ?)",
+                           (first, second, relation, self.encoded(data), now()))
 
     def split_materials(self):
         """Materials a reader split out of an event: a model merge never undoes that."""
