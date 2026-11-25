@@ -220,7 +220,7 @@ class Analyzer:
         payload = [{"id": m.version, "title": m.title, "text": m.text,
                     "evidence_note": "只从 text 连续摘录。title 不是证据正文，禁止把标题复制到 quote。",
                     "material_kind": m.content_kind,
-                    "source_boundary": "研究索引收录的摘要，不是论文全文，主张仅限索引摘要。" if m.content_kind == "index_abstract" else "社区发言，不代表官方或独立验证。" if m.content_kind == "community_post" else "作者模型卡，不等于刚发布，不把检索或更新时间当发布日期。" if is_model_card(m) else "仅依据所提供节选，不推断全文。",
+                    "source_boundary": "研究索引收录的摘要，不是论文全文，主张仅限索引摘要。" if m.content_kind == "index_abstract" else "AIHOT 精选写的中文摘要（第三方模型的二手概括），未读到原帖；主张仅限摘要，不是发布方原文。" if m.content_kind == "curated_summary" else "社区发言，不代表官方或独立验证。" if m.content_kind == "community_post" else "作者模型卡，不等于刚发布，不把检索或更新时间当发布日期。" if is_model_card(m) else "仅依据所提供节选，不推断全文。",
                     "source": m.source_name, "role": m.source_role, "published_at": m.published_at}
                    for m in materials]
         user = json.dumps(payload, ensure_ascii=False)

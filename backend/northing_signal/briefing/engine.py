@@ -90,6 +90,11 @@ LATE_HOURS = 48  # found later than this after publication: archived, not news (
 # research source, or reports from RETURN_SOURCES new outlets. Otherwise it waits in 更多进展, lower.
 RETURN_SOURCES = 4
 CARRIED_PENALTY = 6
+
+
+def via_aihot(material):
+    """Found through AIHOT's picks: a curator's choice, one participant, not another outlet."""
+    return (material.discovery_url or "").startswith("https://aihot.news/")
 SELECT_THRESHOLD = 9  # significance*3 + novelty*2 + usefulness a story needs (see calibrate.py)
 
 
@@ -151,7 +156,9 @@ def standing(timeline, source_count=1):
     tests = {t.get("role") for t in timeline
              if t.get("evidence") == "reported_test" and t.get("content_kind") != "benchmark_snapshot"}
     parts = []
-    if "benchmark_snapshot" in kinds:
+    if kinds == {"curated_summary"}:
+        parts.append("仅有 AIHOT 精选摘要，未读到原文")
+    elif "benchmark_snapshot" in kinds:
         parts.append("公开榜单数据")
     elif "official" in roles:
         parts.append("有官方原文")
@@ -291,13 +298,16 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         first_captured = min(m.captured_at for m, _, _ in members)
         latest_captured = max(m.captured_at for m, _, _ in members)
         dismissed = any(r["kind"] in {"irrelevant", "thin", "duplicate"} for r in recent_actions)
-        protected = urgent(a) and not known_earlier
+        # Only AIHOT's summary of a post we could not read (owner's choice A, 2026-11-25): it may
+        # fill the radar and 更多进展, never focus, and never stands above everything as urgent.
+        curated_only = all(m.content_kind == "curated_summary" for m, _, _ in members)
+        protected = urgent(a) and not known_earlier and not curated_only
         seen_at = last_shown.get(event_id) if event_id in briefed else None
         carried = False
         if seen_at and not protected:
             since_seen = [m for m in found_fresh if stamp(m.captured_at) > seen_at]
             carried = not (any(m.source_role in {"official", "research"} for m in since_seen)
-                           or len({m.source_id for m in since_seen}) >= RETURN_SOURCES)
+                           or len({m.source_id for m in since_seen if not via_aihot(m)}) >= RETURN_SOURCES)
         score = value + (7 if relevant else -3) + (3 * math.exp(-age_days / 7) if dated else 0)
         score += max(-3, min(3, affinities[a.topic]))
         reports = [(m.source_id, stamp(m.published_at)) for m in found_fresh]
@@ -318,6 +328,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
                      "source": m.source_name, "source_id": m.source_id, "role": m.source_role, "url": m.url,
                      "published_at": m.published_at, "captured_at": m.captured_at, "action": b.action,
                      "content_kind": m.content_kind,
+                     **({"via": m.discovery_url} if via_aihot(m) else {}),
                      "evidence": b.evidence, "claims": [c.model_dump() for c in b.claims],
                      "conditions": b.conditions, "limitations": b.limitations}
                     for m, b, _ in sorted(members, key=lambda row: row[0].published_at or row[0].captured_at)]
@@ -328,14 +339,15 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "content_type": a.content_type, "action": a.action, "evidence": a.evidence,
             "content_kind": material.content_kind,
             "claims": [c.model_dump() for c in a.claims], "conditions": a.conditions,
-            "limitations": list(dict.fromkeys([*a.limitations, "依据来源公开榜单的数据节选整理，需保留方法、提交者与核验状态；未由本项目复测。" if material.content_kind == "benchmark_snapshot" else "依据研究索引收录的摘要整理，未核对论文全文。" if material.content_kind == "index_abstract" else "来源为社区发言，不代表官方或独立验证。" if material.content_kind == "community_post" else "依据已取得的原文节选整理，可展开核对。"])),
+            "limitations": list(dict.fromkeys([*a.limitations, "依据来源公开榜单的数据节选整理，需保留方法、提交者与核验状态；未由本项目复测。" if material.content_kind == "benchmark_snapshot" else "依据研究索引收录的摘要整理，未核对论文全文。" if material.content_kind == "index_abstract" else "来源为社区发言，不代表官方或独立验证。" if material.content_kind == "community_post" else "依据 AIHOT 精选的中文摘要整理（第三方模型写成），未读到原帖。" if material.content_kind == "curated_summary" else "依据已取得的原文节选整理，可展开核对。"])),
             "source": material.source_name, "source_role": material.source_role, "url": material.url,
             "source_id": material.source_id,
             "published_at": material.published_at, "captured_at": material.captured_at,
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "standing": standing(timeline, len({m.source_id for m, _, _ in members})),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
-            "roundup": roundup, "carried": carried,
+            "roundup": roundup, "carried": carried, "curated_only": curated_only,
+            "aihot": any(via_aihot(m) for m, _, _ in members),
             "known_earlier": known_earlier, "first_captured_at": first_captured,
             "latest_captured_at": latest_captured, "dated": dated, "timely": is_timely,
             "stale_reason": None if is_timely else "late" if dated else "undated",
@@ -389,6 +401,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         if len(focus) >= 6 or spent + event["reading_seconds"] > budget * 0.7:
             continue
         if event["roundup"] and not event["protected"]:
+            continue
+        if event["curated_only"]:
             continue
         if topic_counts[event["topic"]] >= 3 and not event["protected"]:
             continue

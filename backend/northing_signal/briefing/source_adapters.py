@@ -3,9 +3,10 @@
 import json
 import re
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote, urljoin, urlsplit
 
-from lxml import html
+from lxml import etree, html
 
 from .models import Material, digest, public_url
 
@@ -328,8 +329,56 @@ async def hub_models(source, body, limit, fetch):
     return output
 
 
+# AIHOT 精选摘要 (https://aihot.news/feed.xml, 2026-11-25, owner's choice A). Each pick is
+# AIHOT's own Chinese summary of someone else's post. A pick whose original we can read becomes
+# an ordinary lead on that original (judged only after the page is read); a pick from X or WeChat,
+# which this project cannot read, keeps AIHOT's summary as `curated_summary`: judged, but labelled
+# as a second-hand summary and kept out of focus by the engine.
+UNREADABLE_HOSTS = ("x.com", "twitter.com", "mp.weixin.qq.com")
+
+
+def aihot_picks(source, body, limit):
+    tree = etree.fromstring(body, parser=etree.XMLParser(recover=True, resolve_entities=False, no_network=True))
+    known = source.get("known_hosts", {})
+    output = []
+    for item in tree.iter("item"):
+        if len(output) >= limit:
+            break
+        title = clean(item.findtext("title"))
+        description = item.findtext("description") or ""
+        page = html.fromstring(f"<div>{description}</div>")
+        links = [a.get("href") for a in page.xpath(".//a[@href]")]
+        original = next((u for u in links if (urlsplit(u).hostname or "") not in {"aihot.news", "www.aihot.news"}), None)
+        if not title or not original:
+            continue
+        try:
+            original = public_url(original)
+        except ValueError:
+            continue
+        # Keep AIHOT's summary paragraphs, not its "阅读原文" / "via AIHOT" link lines.
+        summary = clean(" ".join(p.text_content() for p in page.xpath(".//p")
+                                 if not p.xpath(".//a") and "via AIHOT" not in p.text_content()))
+        author = re.search(r"\(([^)]+)\)\s*$", item.findtext("author") or "")
+        author = clean(author.group(1)) if author else ""
+        host = (urlsplit(original).hostname or "").lower()
+        unreadable = any(host == h or host.endswith("." + h) for h in UNREADABLE_HOSTS)
+        role = known.get(host) or ("author" if unreadable else "media")
+        stamp = item.findtext("pubDate")
+        try:
+            date = parsedate_to_datetime(stamp).astimezone(timezone.utc).isoformat() if stamp else None
+        except (TypeError, ValueError):
+            date = None
+        name = f"{author} · 经 AIHOT 精选" if author else "AIHOT 精选"
+        value = material({**source, "name": name, "role": role}, title, original, summary,
+                         kind="curated_summary" if unreadable else "search_excerpt", date=date,
+                         identity=clean(item.findtext("guid")) or original,
+                         discovery_url=clean(item.findtext("link")) or None)
+        output.append(value)
+    return output
+
+
 def parse_index(source, body, limit):
-    return {"publisher_index": publisher_links, "changelog": changelog, "updates": updates,
+    return {"publisher_index": publisher_links, "changelog": changelog, "updates": updates, "aihot": aihot_picks,
             "daily_papers": daily_papers, "openreview": openreview,
             "document": document, "markdown": markdown, "arena": arena,
             "swebench": swebench, "modelscope_models": modelscope_models}[source["kind"]](source, body, limit)

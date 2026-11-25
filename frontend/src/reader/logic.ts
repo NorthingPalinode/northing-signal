@@ -106,7 +106,9 @@ function newestFirst<T extends NewsDate>(rows: T[], undatedLast = false): T[] {
   });
 }
 export const evidence = (value: string, role?: string, kind?: string) =>
-  kind === "benchmark_snapshot"
+  kind === "curated_summary"
+    ? "AIHOT 摘要 · 未读到原文"
+    : kind === "benchmark_snapshot"
     ? "公开榜单数据"
     : kind === "index_abstract"
     ? "索引摘要"
@@ -683,4 +685,93 @@ export function deckStories(list: Story[]) {
     seen.add(s.id);
     return true;
   });
+}
+
+/* ---------- 今日简报 as one edition (2026-11-25) ---------- */
+
+/** How many radar stories join the topic sections; the rest are one-line 快讯. */
+export const EDITION_BODY_RADAR = 5;
+
+/** "11月25日" · "星期三" · "上午版" · "0:46" in the display timezone. */
+export function editionStamp(value?: string | null) {
+  const at = Date.parse(value ?? "");
+  if (!Number.isFinite(at)) return null;
+  const d = zoned(at);
+  const weekday = "日一二三四五六"[new Date(Date.UTC(d.year, d.month - 1, d.day)).getUTCDay()];
+  return {
+    date: `${d.month}月${d.day}日`,
+    weekday: `星期${weekday}`,
+    edition: d.hour < 12 ? "上午版" : "下午版",
+    time: `${d.hour}:${String(d.minute).padStart(2, "0")}`,
+  };
+}
+
+/** The briefing laid out as one edition: a lead, three highlights, the rest of focus and the
+ * first radar stories by topic, the remaining radar as 快讯, and older stories with news since the
+ * last visit. Order inside each part is the engine's importance order; nothing is added or
+ * dropped from the engine's focus and radar. Change labels are sinceVisit's. */
+export function editionLayout(view: View, bodyRadar = EDITION_BODY_RADAR) {
+  const byId = new Map(view.events.map((e) => [e.id, e]));
+  const pick = (ids: string[]) =>
+    ids.map((id) => byId.get(id)).filter((e): e is Story => !!e && !e.dismissed);
+  const focus = pick(view.focus);
+  let radar = pick(view.radar);
+  let lead: Story | null = focus[0] ?? null;
+  if (!lead && radar.length) [lead, ...radar] = radar;
+  const highlights = focus.slice(1, 4);
+  const body = [...focus.slice(4), ...radar.slice(0, bodyRadar)];
+  const brief = radar.slice(bodyRadar);
+  const stories = [...(lead ? [lead] : []), ...highlights, ...body, ...brief];
+  const sections: { topic: string; label: string; stories: Story[] }[] = [];
+  for (const story of body) {
+    const section = sections.find((s) => s.topic === story.topic);
+    if (section) section.stories.push(story);
+    else sections.push({ topic: story.topic, label: story.topic_label, stories: [story] });
+  }
+  const changes = new Map((sinceVisit(stories, view.previous_visit) || []).map((c) => [c.story.id, c]));
+  // Older news: first seen before the last visit, a report collected since, not in this edition.
+  const since = Date.parse(view.previous_visit ?? "");
+  const shown = new Set(stories.map((s) => s.id));
+  const older = Number.isFinite(since)
+    ? view.events.filter(
+        (e) =>
+          e.qualified &&
+          !e.dismissed &&
+          !shown.has(e.id) &&
+          e.timely !== false &&
+          Date.parse(e.first_captured_at ?? e.captured_at ?? "") <= since,
+      )
+    : [];
+  const followups = (sinceVisit(older, view.previous_visit) || []).slice(0, 4);
+  return {
+    lead,
+    highlights,
+    sections,
+    brief,
+    followups,
+    stories,
+    changes,
+    read: stories.filter((s) => s.known).length,
+  };
+}
+
+/** One story's reports over the last `days` days on a 0..1 line ending at now, in the marks of
+ * the evidence chart (official/paper text, test, coverage, opinion, correction). */
+export function recentMarks(story: Story, now = new Date(), days = 7) {
+  const end = now.getTime();
+  const start = end - days * 86400000;
+  const points = evidenceStages(story)
+    .nodes.map((n) => {
+      const at = Date.parse(n.entry.published_at ?? "") || Date.parse(n.entry.captured_at ?? "");
+      return {
+        x: (at - start) / (end - start),
+        mark: (n.stage === "coverage" && n.entry.evidence === "opinion" ? "opinion" : n.stage) as Mark,
+        label: n.label,
+        entry: n.entry,
+      };
+    })
+    .filter((p) => Number.isFinite(p.x) && p.x >= 0)
+    .map((p) => ({ ...p, x: Math.min(1, p.x) }));
+  // Hollow reports first, so statements, tests and corrections draw on top.
+  return points.sort((a, b) => Number(b.mark === "coverage") - Number(a.mark === "coverage"));
 }

@@ -31,6 +31,8 @@ export type Entry = {
   source_id?: string;
   role: string;
   url: string;
+  /** AIHOT's page for this report when it was found through AIHOT's picks. */
+  via?: string;
   published_at: string | null;
   captured_at?: string;
   action: string;
@@ -79,6 +81,10 @@ export type Story = {
   updated?: boolean;
   /** In an earlier briefing's focus or radar, seen there and not opened, with no news since. */
   carried?: boolean;
+  /** AIHOT also picked it (any report found through aihot.news). */
+  aihot?: boolean;
+  /** Only AIHOT's summary of a post we could not read: radar and 更多进展, never focus. */
+  curated_only?: boolean;
   /** Found while it was news. Late finds and undated reports are archived, not "today". */
   timely?: boolean;
   stale_reason?: "late" | "undated" | null;

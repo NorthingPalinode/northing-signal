@@ -6,13 +6,13 @@
 
 当前采用独立的 Python / React 内容引擎。旧版目标工作台与 G1–G4 研究材料已从主分支移除，仍可在主分支历史的提交 [`287e2c6`](https://github.com/NorthingPalinode/northing-signal/tree/287e2c61ad00fb8407a81a2edb8165a2800f665b) 中查看；旧个人数据库未自动迁移或删除，可以用 `scripts/export_legacy.py` 导出。
 
-当前版本已接入 **64 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
+当前版本已接入 **80 个固定来源入口 + 9 类可选主动检索**，支持事件聚合与报道时间线、原文依据、自然语言确认追踪、收藏和阅读反馈。来源宣称、文中测试、公开榜单与本项目独立实测分别看待；当前没有开展本项目独立模型复测。
 
 ## 可以做什么
 
 | 页面 | 用途 |
 |---|---|
-| 简报 | 最上方「距你上次来，有 N 件事变了」，然后是「最重要的 3 件事」，下接「重点」「前沿速览」「更多进展」三段，都按重要性排（更正与撤回在最前，其后按简报分数，同分时较新的在前），可按方向筛选；搜索、收藏、追踪和路线图仍按时间从新到旧；最近一次更新新增的内容标【新】，已有事件出现新报道标「有更新」 |
+| 简报 | 一期简报，以「距你上次来」为主线：报头（日期、上午版/下午版、距你上次来的时间、条数与约几分钟）、这一期的变化汇总与已读进度，然后是头条（导语、为什么值得读、依据与最近 7 天的报道小时间轴）、今日看点 3 条、分栏目（其余重点与前 5 条速览按方向分组）、「之前的事，有了新进展」、快讯，结尾「距你上次来的变化，就这些」与「全部进展」入口。每条都按同一顺序写：变化标签（新、更正、新测试、有更新、新报道 N 篇）→ 标题 → 为什么值得读 → 依据。条目就是引擎选出的重点与速览，按重要性排（更正与撤回在最前，其后按简报分数，同分时较新的在前）；搜索、收藏、追踪和路线图仍按时间从新到旧；最近一次更新新增的内容标【新】，已有事件出现新报道标「有更新」 |
 | 动向 | 同一批进展的四个板块：「公司动向」以公司 Logo 大卡牌总览各家最新动作与产品分布，点击进入该公司的路线图；「开源与社区」「研究」「政策与产业」各成一列。详见下文「动向」 |
 | 搜索 | 一个搜索框：先筛选已有进展，没有结果时一键到所选公开来源检索，或交给 AI 持续追踪 |
 | 追踪 | 用自然语言描述需求，核对 AI 理解与检索方案，确认后持续追踪；按话题查看新进展与未读数，打开一条即从未读数中减去，也可「全部标为已读」 |
@@ -68,7 +68,7 @@
 
 - 设计约定见 `docs/design/DESIGN.md`，颜色、圆角、阴影与动效只在 `frontend/src/tokens.css` 定义；视觉基准是 `docs/design/preview/northing-signal.html`。
 - 左侧抽屉导航：阅读（简报、动向、追踪、收藏、资料库）、公司动向（默认是动作最多的 4 家，点标题旁的编辑按钮可以自选最多 8 家并调整顺序，随账号保存；直接进入路线图）、追踪话题（含新进展数）和工具（过去的简报、导出周报、来源状态、阅读偏好、账号）。按 `[` 隐藏，隐藏后指针移到窗口左缘会浮出；`/` 进入搜索。
-- 简报页：距上次来的变化、最重要的 3 件事（第一件通栏）、其余重点、前沿速览与更多进展；方向筛选在列表上方。
+- 简报页：一期简报（2026-11-25 改版）。报头与变化汇总、头条、今日看点、分栏目、之前的事有了新进展、快讯，结尾给出全部进展入口；其余进展不再接在简报后面，在搜索页按时间浏览。
 - 「快速翻阅」：在简报页逐张浏览最多 30 条未读内容。底部只有三个按钮——上一张、打开这张、下一张（左右滑动或 `←` `→` 同样翻页，回车打开）；收藏按钮在卡片上（`S`）。翻页不标记任何内容，只有打开才算读过。
 - 公司动向为带 logo 的大卡片（名称、动作数、自上次来新增），近期没有本身动作的公司列为灰色小块。
 - 手机端抽屉从窗口栏打开，另有底部标签栏，所有弹窗改为底部面板；外观可选浅色、深色或跟随系统（抽屉底部的切换，默认跟随系统，跟随时系统切换会立即生效）；选择保存在当前设备的浏览器里，不随账号同步。
@@ -113,17 +113,18 @@ python -m northing_signal.briefing publish --out .local/public
 
 ## 信息来源
 
-固定来源池已从 12 个扩展为 64 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
+固定来源池已从 12 个扩展为 80 个入口，按核心与补充来源排列。配置见 [briefing_sources.json](data/briefing_sources.json)，完整清单、逐源检查与按重要性排列的受限项见 [来源接入说明](docs/SOURCES.md)。
 
 | 固定来源类型 | 数量 | 代表来源与材料 |
 |---|---:|---|
-| 官网发布与更新日志 | 10 | Anthropic、DeepSeek、Kimi、MiniMax、ByteDance Seed、Meta、xAI、Mistral、阿里云百炼（Qwen）、智谱 |
+| 官网发布与更新日志 | 14 | Anthropic、DeepSeek、Kimi、MiniMax、ByteDance Seed、Meta、xAI、Mistral、阿里云百炼（Qwen）、智谱、Thinking Machines、Cognition、Cohere、METR |
 | 开源版本 | 7 | vLLM、SGLang、Ollama、Transformers、LangGraph、Kimi Code、Claude Code |
 | 模型目录与模型卡 | 10 | 九个 Hugging Face 官方组织，以及 ModelScope 的 Qwen 公开目录 |
 | 论文发现 | 2 | arXiv 分类查询、Hugging Face Daily Papers |
 | 评测数据与项目更新 | 3 | Arena 文本榜、SWE-bench Verified；LiveBench 当前仅更新记录 |
+| 外部精选 | 1 | AIHOT 精选摘要（aihot.news，背后约 923 个信源，含 X 与公众号）：能读到原文的只当线索、读原文后整理；原帖在 X 或公众号读不到的，按 AIHOT 的中文摘要整理并标「AIHOT 摘要 · 未读到原文」，只进速览和更多进展，不进重点和公开日报；凡被 AIHOT 选中的卡片标「AIHOT 精选」，AIHOT 只算一个参与方 |
 | GitHub 榜单 | 4 | Trending 今日榜与本周榜（公开网页）、近 30 天新建与 star 总量（官方搜索接口），只保留 AI 项目；排名不经模型，只有一句中文介绍由模型改写 |
-| RSS / Atom | 28 | OpenAI、Google AI 官方博客、Microsoft 新闻中心与 Azure、Apple、Amazon 与 AWS、NVIDIA 新闻稿、Google DeepMind、研究机构、Simon Willison、Interconnects、Latent Space、量子位；科技与商业媒体 The Verge、Ars Technica、CNBC、MIT Technology Review、雷峰网、极客公园等 |
+| RSS / Atom | 39 | OpenAI、PyTorch、Google AI 官方博客、Microsoft 新闻中心与 Azure、Apple、Amazon 与 AWS、NVIDIA 新闻稿、Google DeepMind、研究机构、Simon Willison、Interconnects、Latent Space、Import AI、Zvi、SemiAnalysis、ChinaTalk、量子位；科技与商业媒体 The Verge、Ars Technica、CNBC、MIT Technology Review、IEEE Spectrum、Platformer、Rest of World、404 Media、雷峰网、极客公园、钛媒体、爱范儿等 |
 
 这些是入口数量，不等于独立发布方数，也不代表完整或持续覆盖。另有以下九类主动检索入口，与固定池另计：
 

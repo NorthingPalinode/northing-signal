@@ -132,6 +132,11 @@ def parse(source, body, limit):
         # streaming or retail news never takes a place in the model's judging budget.
         wanted = re.compile(source["require"])
         entries = [e for e in entries if wanted.search(f"{e.get('title') or ''} {e.get('summary') or ''}")]
+    if source.get("require_title"):
+        # General tech media with full-text feeds (2026-11-25): nearly every article mentions AI
+        # somewhere, so only the headline decides whether it takes a place in the judging budget.
+        headline = re.compile(source["require_title"])
+        entries = [e for e in entries if headline.search(e.get("title") or "")]
     output = []
     seen = set()
     for entry in entries:
@@ -174,6 +179,11 @@ async def collect(store, sources, limit=10, progress=None, github_token=""):
     semaphore = asyncio.Semaphore(4)
     # Chinese lines written in earlier updates, reused while a project's description is unchanged.
     lines = known_lines(store.source_states().values())
+    # A curated pick linking to a registered official or research site keeps that site's role.
+    # Only the publishers' own sites: shared hosts (GitHub, Hugging Face, arXiv) say nothing.
+    known_hosts = {host: s["role"] for s in sources if s.get("role") in {"official", "research"}
+                   and s.get("kind") in {"rss", "publisher_index", "changelog", "updates", "document"}
+                   for host in [*s.get("hosts", []), *s.get("article_hosts", [])]}
 
     async def one(source):
         async with semaphore:
@@ -186,6 +196,8 @@ async def collect(store, sources, limit=10, progress=None, github_token=""):
                              "count": len(ranked), "added": 0, "with_text": 0, "error": None,
                              "ranking": ranked, "ranking_at": now()}
                 else:
+                    if source.get("kind") == "aihot":
+                        source = {**source, "known_hosts": known_hosts}
                     rows = await asyncio.wait_for(read_source(source, limit), 35)
                     added = sum(store.capture(row) for row in rows)
                     value = {"status": "ok" if rows else "empty", "at": now(), "last_success": now(),

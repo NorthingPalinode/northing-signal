@@ -12,6 +12,8 @@ import FollowIntentForm, { intervalLabel } from "./FollowIntentForm";
 import StoryReader, { DetailActions, FeedbackChoices } from "./StoryDetail";
 import CompanyLogo, { companyAccent } from "./CompanyLogo";
 import QuickDeck from "./QuickDeck";
+import { useExposure } from "./exposure";
+import { ChangeTag, EditionItem, EditionLead, EditionQuick, EditionSection } from "./Edition";
 import DrawerCompanies from "./DrawerCompanies";
 import { useTheme, type ThemeChoice } from "./theme";
 import { Glyph, Sheet, Toast } from "./ui";
@@ -38,6 +40,8 @@ import {
   lineDays,
   deckStories,
   drawerCompanies,
+  editionLayout,
+  editionStamp,
   isMajor,
   lensLabel,
   lensStories,
@@ -120,42 +124,6 @@ const lensNote: Record<Lens, string> = {
   policy: "监管、出口管制、投融资、并购与人事",
 };
 
-/** Sends a one-off "shown" interaction the first time a story is on screen. */
-function useExposure(
-  story: Story,
-  send: (s: Story, kind: string) => Promise<unknown>,
-) {
-  const ref = useRef<HTMLElement>(null);
-  const sent = useRef(false);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    const check = () => {
-      const box = node.getBoundingClientRect();
-      if (
-        !sent.current &&
-        document.visibilityState === "visible" &&
-        box.bottom > 0 &&
-        box.top < innerHeight &&
-        box.height > 0
-      ) {
-        sent.current = true;
-        void send(story, "shown").catch(() => {
-          sent.current = false;
-        });
-      }
-    };
-    const observer = new IntersectionObserver(check, { threshold: 0.25 });
-    observer.observe(node);
-    document.addEventListener("visibilitychange", check);
-    return () => {
-      observer.disconnect();
-      document.removeEventListener("visibilitychange", check);
-    };
-  }, [story.id, story.version, send]);
-  return ref;
-}
-
 function StoryRow({
   story,
   variant = "normal",
@@ -214,6 +182,11 @@ function StoryRow({
           )}
           {story.protected && (
             <span className="r-badge warn">重要{actionLabel[story.action]}</span>
+          )}
+          {story.aihot && (
+            <span className="r-badge aihot" title="AIHOT（aihot.news）的编辑精选也选了这条">
+              AIHOT 精选
+            </span>
           )}
           {story.carried && !story.known && (
             <span
@@ -1083,89 +1056,85 @@ export default function ReaderApp() {
 
   function briefingPage() {
     if (!view) return null;
-    const visibleMore = showAllMore ? more : more.slice(0, 8);
-    const nothing = !focus.length && !radar.length && !more.length;
-    const top = topic ? [] : topThree(view);
-    const rest = focus.filter((s) => !top.includes(s));
-    // "Since you were last here": the briefing's real changes, the reason to come back.
-    const changes = historical || topic ? null : sinceVisit(briefingList, view.previous_visit);
-    const changed = changes?.map((c) => c.story) || [];
-    const newOnes = changes?.filter((c) => c.kind === "new").length || 0;
-    return (
-      <>
-        {changes && changes.length === 0 && (
-          <p className="r-delta-none">
-            距你上次来（{clockLabel(view.previous_visit)}）没有新的实质变化，下面是仍值得读的内容。
+    // One edition (DESIGN.md §7): what changed since the last visit, why it matters, its evidence.
+    const ed = editionLayout(view);
+    const stamp = editionStamp(historical ? view.as_of : view.last_refresh?.finished_at || view.as_of);
+    const total = ed.stories.length;
+    const minutes = Math.max(1, Math.round(view.estimated_seconds / 60));
+    const shown = new Set(ed.stories.map((s) => s.id));
+    const others = view.events.filter(
+      (e) => e.qualified && !e.dismissed && e.timely !== false && !shown.has(e.id),
+    ).length;
+    const next = view.schedule?.enabled ? clockLabel(view.schedule.next) : "";
+    const tones = { 新: 0, 更正: 0, 新测试: 0, 有更新: 0, 新报道: 0 };
+    for (const c of ed.changes.values()) {
+      const key = (c.label.startsWith("新报道") ? "新报道" : c.label) as keyof typeof tones;
+      if (key in tones) tones[key]++;
+    }
+    const tags = Object.entries(tones).filter(([, n]) => n > 0);
+    const unit = (story: Story) => ({
+      story,
+      change: ed.changes.get(story.id),
+      readOnly: !!historical,
+      send: historical ? noSend : send,
+      open: () => open(story, ed.stories),
+      toggleSave: () => void act(story, "saved"),
+      askFeedback: () => setFeedback(story),
+    });
+    const masthead = (
+      <header className="r-ed-mast">
+        <div>
+          <p className="r-ed-kicker-top">
+            {historical ? "过去的简报" : "今日简报"}
+            {stamp ? ` · ${stamp.edition}` : ""}
           </p>
-        )}
-        {changes && changes.length > 0 && (
-          <section className="r-delta" aria-label="距你上次来的变化">
-            <header className="r-delta-head">
-              <strong className="r-delta-n">{changes.length}</strong>
-              <div>
-                <h2>件事在你上次来之后有变化</h2>
-                <small>
-                  上次 {clockLabel(view.previous_visit)}
-                  {newOnes ? ` · ${newOnes} 件新事` : ""}
-                  {changes.length - newOnes ? ` · ${changes.length - newOnes} 件有新进展` : ""}
-                </small>
-              </div>
-            </header>
-            <ul>
-              {changes.slice(0, 6).map(({ story: s, kind, label }) => (
-                <li key={s.id}>
-                  <button onClick={() => open(s, changed)}>
-                    <span className={"r-delta-tag " + kind}>{label}</span>
-                    <strong>{s.title}</strong>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {changes.length > 6 && (
-              <button className="r-link small" onClick={() => open(changed[6], changed)}>
-                还有 {changes.length - 6} 件，接着读
-              </button>
-            )}
-          </section>
-        )}
-        {top.length > 0 && (
-          <section className="r-section" aria-label="最重要的几件事">
-            <header className="r-section-head">
-              <h2>
-                {historical ? "当时" : ""}最重要的 {top.length} 件事
-              </h2>
-              <small>按重要性、时效和你的偏好选出</small>
-            </header>
-            <div className="r-top3">
-              {top.map((s, i) => row(s, i === 0 ? "lead" : "normal", { index: i, list: top }))}
-            </div>
-          </section>
-        )}
-        <TopicFilter
-          topic={topic}
-          setTopic={setTopic}
-          counts={topicCounts(all.filter((e) => e.qualified && !e.dismissed))}
-        />
-        {nothing ? (
+          <h1>
+            {stamp?.date || "今日简报"}
+            {stamp && <span>{stamp.weekday}</span>}
+          </h1>
+        </div>
+        <div className="r-page-actions">
+          {!historical && deckList.length > 0 && (
+            <button className="r-button" onClick={() => setDeck(deckList)} title="逐张浏览未读内容">
+              <Glyph name="cards" size={16} />
+              <span>快速翻阅</span>
+              <small>{deckList.length}</small>
+            </button>
+          )}
+          {!historical && updateButton}
+        </div>
+        <p className="r-ed-meta">
+          {view.previous_visit && (
+            <span>
+              距你上次来 <b>{clockLabel(view.previous_visit)}</b>
+            </span>
+          )}
+          <span>
+            <b>{total}</b> 条
+          </span>
+          <button className="r-link" onClick={openPrefs} title="在「阅读偏好」中调整每次阅读时长">
+            约 {minutes} 分钟（预算 {view.preferences.budget_minutes} 分钟）
+          </button>
+          {stamp && <span>{historical ? `${stamp.time} 的一期` : `${stamp.time} 更新`}</span>}
+          {!historical && next && <span>下次 {next}</span>}
+        </p>
+      </header>
+    );
+    if (!ed.lead)
+      return (
+        <>
+          {masthead}
           <Empty
             icon="compass"
-            title={
-              topic
-                ? "这个方向暂时没有内容"
-                : view.counts.materials
-                  ? "还没有整理好的进展"
-                  : "从第一次更新开始"
-            }
+            title={view.counts.materials ? "还没有整理好的进展" : "从第一次更新开始"}
           >
             <p>
-              {topic
-                ? "换个方向看看，或到资料库查找原始材料。"
-                : view.counts.pending
-                  ? `已收取 ${view.counts.materials} 条材料，还有 ${view.counts.pending} 条等待整理。${view.model_configured ? "" : "当前未配置模型，材料会保留但不会被整理。"}`
-                  : "检查官方发布、研究与专业作者，把有依据的变化整理给你。"}
+              {view.counts.pending
+                ? `已收取 ${view.counts.materials} 条材料，还有 ${view.counts.pending} 条等待整理。${view.model_configured ? "" : "当前未配置模型，材料会保留但不会被整理。"}`
+                : "检查官方发布、研究与专业作者，把有依据的变化整理给你。"}
             </p>
             <div className="r-empty-actions">
-              {!topic && !running && !historical && (
+              {!running && !historical && (
                 <button className="r-button primary" onClick={() => void refresh()}>
                   立即更新
                 </button>
@@ -1175,55 +1144,91 @@ export default function ReaderApp() {
               </button>
             </div>
           </Empty>
-        ) : (
-          <>
-            {rest.length > 0 && (
-              <section className="r-section">
-                <header className="r-section-head">
-                  <h2>{top.length ? "其余重点" : "重点"}</h2>
-                  <button
-                    className="r-link small"
-                    onClick={openPrefs}
-                    title="在「阅读偏好」中调整每次阅读时长"
-                  >
-                    按 {view.preferences.budget_minutes} 分钟阅读时长选出 · 约{" "}
-                    {Math.max(1, Math.ceil(view.estimated_seconds / 60))} 分钟
-                  </button>
-                </header>
-                <div className="r-grid">
-                  {rest.map((s) => row(s, "normal", { list: briefingList }))}
-                </div>
-              </section>
-            )}
-            {radar.length > 0 && (
-              <section className="r-section">
-                <header className="r-section-head">
-                  <h2>前沿速览</h2>
-                  <small>值得留意的新方向</small>
-                </header>
-                <div className="r-rows">
-                  {radar.map((s) => row(s, "compact", { list: briefingList }))}
-                </div>
-              </section>
-            )}
-            {more.length > 0 && (
-              <section className="r-section">
-                <header className="r-section-head">
-                  <h2>更多进展</h2>
-                  <small>{more.length} 项 · 有依据、未放进重点 · 最新在前</small>
-                </header>
-                <div className="r-rows">
-                  {visibleMore.map((s) => row(s, "compact", { list: briefingList }))}
-                </div>
-                {more.length > visibleMore.length && (
-                  <button className="r-button block" onClick={() => setShowAllMore(true)}>
-                    再显示 {more.length - visibleMore.length} 项
-                  </button>
-                )}
-              </section>
-            )}
-          </>
+        </>
+      );
+    return (
+      <>
+        {masthead}
+        <div className="r-ed-since">
+          {!view.previous_visit ? (
+            <strong>第一次来：这一期有 {total} 条值得知道的变化。</strong>
+          ) : tags.length ? (
+            <>
+              <strong>这一期，距你上次来变了这些：</strong>
+              <span className="r-ed-tags">
+                {tags.map(([label, n]) => (
+                  <ChangeTag key={label} change={{ story: ed.lead!, kind: label === "新" ? "new" : label === "更正" ? "correction" : "updated", label: `${label} ${n}` }} />
+                ))}
+              </span>
+            </>
+          ) : (
+            <strong>距你上次来没有新的实质变化，下面是仍值得读的内容。</strong>
+          )}
+          <span className="r-ed-progress" aria-label={`已读 ${ed.read} / ${total}`}>
+            已读 <b>{ed.read}</b>/{total}
+            <span className="r-ed-bar">
+              <i style={{ width: `${(ed.read / Math.max(1, total)) * 100}%` }} />
+            </span>
+          </span>
+        </div>
+
+        <EditionLead {...unit(ed.lead)} />
+
+        {ed.highlights.length > 0 && (
+          <EditionSection title="今日看点" note="其次最值得知道的几件">
+            <div className="r-ed-highlights">
+              {ed.highlights.map((s) => (
+                <EditionItem key={s.id + s.version} {...unit(s)} strip />
+              ))}
+            </div>
+          </EditionSection>
         )}
+
+        {ed.sections.length > 0 && (
+          <EditionSection title="分栏目" note="其余重点与速览，按方向排">
+            <div className="r-ed-columns">
+              {ed.sections.map((section) => (
+                <div key={section.topic} className="r-ed-topic-block">
+                  <h3 className={"r-ed-topic-head t-" + section.topic}>{section.label}</h3>
+                  {section.stories.map((s) => (
+                    <EditionItem key={s.id + s.version} {...unit(s)} topic={false} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </EditionSection>
+        )}
+
+        {ed.followups.length > 0 && (
+          <EditionSection title="之前的事，有了新进展" note="你上次来之前就有，之后出现了新报道">
+            <div className="r-ed-columns two">
+              {ed.followups.map((c) => (
+                <EditionItem key={c.story.id + c.story.version} {...unit(c.story)} change={c} />
+              ))}
+            </div>
+          </EditionSection>
+        )}
+
+        {ed.brief.length > 0 && (
+          <EditionSection title="快讯" note="一行一条">
+            <ol className="r-ed-quicklist">
+              {ed.brief.map((s) => (
+                <EditionQuick key={s.id + s.version} {...unit(s)} />
+              ))}
+            </ol>
+          </EditionSection>
+        )}
+
+        <div className="r-ed-end">
+          <h3>{view.previous_visit ? "距你上次来的变化，就这些。" : "这一期就这些。"}</h3>
+          <p>
+            已读 {ed.read}/{total}
+            {!historical && next ? ` · 下次更新 ${next}` : ""}。其余 {others} 条进展不在本期，按时间排在「全部进展」。
+          </p>
+          <button className="r-button" onClick={() => navigate("discover")}>
+            全部进展 {others} 条 <Glyph name="arrow" size={15} />
+          </button>
+        </div>
       </>
     );
   }
@@ -2582,7 +2587,7 @@ export default function ReaderApp() {
         </div>
 
         <main className="r-page" key={page === "trends" ? `trends-${trend.lens}-${trend.company}` : page}>
-          {page !== "story" && (
+          {page !== "story" && page !== "briefing" && (
             <header className="r-page-head">
               <div>
                 <h1>{pageTitle[page]}</h1>
@@ -2595,14 +2600,6 @@ export default function ReaderApp() {
                     <span>新增追踪</span>
                   </button>
                 )}
-                {page === "briefing" && deckList.length > 0 && (
-                  <button className="r-button" onClick={() => setDeck(deckList)} title="逐张浏览未读内容">
-                    <Glyph name="cards" size={16} />
-                    <span>快速翻阅</span>
-                    <small>{deckList.length}</small>
-                  </button>
-                )}
-                {page === "briefing" && updateButton}
               </div>
             </header>
           )}

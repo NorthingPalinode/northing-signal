@@ -22,6 +22,9 @@ import {
   evidenceLanes,
   deckStories,
   drawerCompanies,
+  editionLayout,
+  editionStamp,
+  recentMarks,
   lensStories,
   lineCounts,
   lineDays,
@@ -495,4 +498,56 @@ test("the theme follows the reader's choice, or the system when they chose 跟�
   assert.equal(resolveTheme("dark", false), "dark");
   assert.equal(resolveTheme("auto", true), "dark");
   assert.equal(resolveTheme("auto", false), "light");
+});
+
+test("AIHOT's summary of a post we could not read is labelled as such, never as the publisher's words", () => {
+  assert.equal(evidence("source_attributed", "author", "curated_summary"), "AIHOT 摘要 · 未读到原文");
+  assert.equal(evidence("source_attributed", "official", "publisher_excerpt"), "原文陈述");
+});
+
+test("the briefing is laid out as one edition in the engine's order, nothing added or dropped", () => {
+  const at = (h: number) => `2026-11-25T${String(h).padStart(2, "0")}:00:00Z`;
+  const s = (id: string, topic: string, changes: Partial<Story> = {}) =>
+    story(id, { topic, topic_label: topic, first_captured_at: at(10), captured_at: at(10), ...changes });
+  const focus = ["f1", "f2", "f3", "f4", "f5", "f6"].map((id, i) => s(id, i % 2 ? "agents" : "models"));
+  const radar = ["r1", "r2", "r3", "r4", "r5", "r6", "r7"].map((id) => s(id, "research"));
+  // Seen before the last visit, a new report since: older news, outside the edition.
+  const older = s("old", "industry", {
+    first_captured_at: "2026-11-20T00:00:00Z",
+    timeline: [{ version: "v", title: "t", summary: "", source: "X", role: "media", url: "https://e.org", published_at: null,
+      captured_at: at(9), action: "test", evidence: "reported_test", claims: [], conditions: [], limitations: [] }],
+  });
+  const quiet = s("quiet", "industry", { first_captured_at: "2026-11-20T00:00:00Z" });
+  const v = view([...focus, ...radar, older, quiet], {
+    focus: focus.map((e) => e.id), radar: radar.map((e) => e.id), previous_visit: "2026-11-25T00:00:00Z",
+  });
+  const ed = editionLayout(v, 5);
+  assert.equal(ed.lead?.id, "f1");
+  assert.deepEqual(ed.highlights.map((e) => e.id), ["f2", "f3", "f4"]);
+  assert.deepEqual(ed.sections.map((x) => [x.topic, x.stories.map((e) => e.id)]),
+    [["models", ["f5"]], ["agents", ["f6"]], ["research", ["r1", "r2", "r3", "r4", "r5"]]]);
+  assert.deepEqual(ed.brief.map((e) => e.id), ["r6", "r7"]);
+  assert.equal(ed.stories.length, 13);
+  assert.equal(ed.changes.get("f1")?.label, "新");
+  assert.deepEqual(ed.followups.map((c) => [c.story.id, c.label]), [["old", "新测试"]]);
+  // Without focus, the first radar story leads.
+  assert.equal(editionLayout(view(radar, { radar: radar.map((e) => e.id) })).lead?.id, "r1");
+});
+
+test("an edition is stamped with its local date, weekday and half of the day", () => {
+  setDisplayZone("America/New_York");
+  assert.deepEqual(editionStamp("2026-11-25T05:46:00Z"), { date: "11月25日", weekday: "星期三", edition: "上午版", time: "0:46" });
+  assert.equal(editionStamp("2026-11-25T17:05:00Z")?.edition, "下午版");
+  assert.equal(editionStamp(""), null);
+});
+
+test("the report strip places a story's last week of reports up to now", () => {
+  const entry = (role: string, published_at: string, evidence = "source_attributed") => ({ version: role + published_at,
+    title: "t", summary: "", source: role, role, url: "https://e.org", published_at, action: "release", evidence,
+    claims: [], conditions: [], limitations: [] });
+  const marks = recentMarks(story("s", { timeline: [entry("official", "2026-11-24T00:00:00Z"),
+    entry("media", "2026-11-10T00:00:00Z"), entry("media", "2026-11-24T12:00:00Z", "opinion")] }),
+    new Date("2026-11-25T00:00:00Z"), 4);
+  // The month-old report is outside the window.
+  assert.deepEqual(marks.map((m) => [m.mark, m.x]), [["statement", 0.75], ["opinion", 0.875]]);
 });

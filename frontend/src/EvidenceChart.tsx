@@ -22,7 +22,7 @@ const markName: Record<Mark, string> = {
   change: "更正与更新",
 };
 
-function Shape({ mark, x, y }: { mark: Mark; x: number; y: number }) {
+export function Shape({ mark, x, y }: { mark: Mark; x: number; y: number }) {
   if (mark === "statement") return <rect x={x - 5} y={y - 5} width={10} height={10} rx={2} />;
   if (mark === "test") return <path d={`M${x} ${y - 6}L${x + 6} ${y + 5}H${x - 6}Z`} />;
   if (mark === "change") return <path d={`M${x} ${y - 6}L${x + 6} ${y}L${x} ${y + 6}L${x - 6} ${y}Z`} />;

@@ -14,7 +14,7 @@ Stage 0 of the UI/UX workflow (2026-11-25). Visual decisions live in [DESIGN.md]
 - **Desired Emotional Tone**: Calm, exact, trustworthy. Evidence is stated plainly (official text, vendor test, others' report, opinion), never as a confidence score.
 
 ## 3. Core User Flows (Jobs to Be Done)
-1. **Primary — catch up**: open 今日简报 → read "距你上次来，有 N 件事变了" → open the most important three → check the evidence timeline → mark known / save / follow.
+1. **Primary — catch up**: open 今日简报 (one edition) → the masthead says when you were last here and what changed (新 / 更正 / 新测试 / 有更新 / 新报道) → read the lead and the three highlights, each with why it matters and its evidence → skim the topic columns and 快讯 → "距你上次来的变化，就这些" → open a story for its evidence timeline → mark known / save / follow.
 2. **Quick pass**: 快速翻阅 → page through today's unread stories (上一张 / 打开这张 / 下一张; swipe or ← → also turn pages; 收藏 on the card) → done. Turning a page marks nothing.
 3. **Look into a company or lens**: 动向 → company card (logo, move count) → the company's line, grouped by day and product.
 4. **Follow a topic**: describe it in one sentence → review the AI's plan → confirm → new matches appear under 追踪.
@@ -23,7 +23,7 @@ Stage 0 of the UI/UX workflow (2026-11-25). Visual decisions live in [DESIGN.md]
 ## 4. Information Architecture & Screen Priority
 | Screen / Route | Primary Goal (One Thing) | Key Modules | Primary CTA |
 | :--- | :--- | :--- | :--- |
-| `#briefing` 今日简报 | Know what changed and the top three | since-last-visit panel, top three, 重点, 前沿速览, 更多进展 | 更新 / 快速翻阅 |
+| `#briefing` 今日简报 | Know what changed since the last visit, why, and on what evidence | masthead and change summary, lead, 今日看点, topic columns, 之前的事有了新进展, 快讯, ending with 全部进展 | 更新 / 快速翻阅 |
 | `#story/<id>` 阅读 | Judge one event and its evidence | summary, why, evidence chart + checklist, stage list, claims, limits | 收藏 / 已了解 |
 | `#trends` 动向 | See who moved | lens tabs; company logo cards; company line; GitHub rankings | open a company |
 | `#discover` 搜索 | Find in what is collected, then outside | search box, external search, results | 到外部搜索 |

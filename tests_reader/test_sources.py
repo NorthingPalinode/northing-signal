@@ -239,3 +239,19 @@ def test_general_newsrooms_keep_only_ai_entries():
     rows = parse(source("rss", require=r"(?i)\b(AI|Siri)\b"), feed, 5)
     assert [r.url for r in rows] == ["https://example.org/news/siri"]
     assert len(parse(source("rss"), feed, 5)) == 2
+
+
+
+def test_general_media_can_require_ai_in_the_headline_only():
+    feed = ('<rss><channel>'
+            '<item><title>3D printer launches at a lower price</title><link>https://example.org/a/printer</link>'
+            '<description>Long review. Its slicer now has an AI assistant.</description>'
+            '<pubDate>Mon, 23 Nov 2026 10:00:00 GMT</pubDate></item>'
+            '<item><title>大模型价格战</title><link>https://example.org/a/llm</link>'
+            '<description>Body.</description><pubDate>Mon, 23 Nov 2026 11:00:00 GMT</pubDate></item>'
+            '</channel></rss>').encode()
+    rule = r"(?i)\bAI\b|大模型"
+    # The body mentions AI, so a body-wide rule keeps both; the headline rule keeps only the AI story.
+    assert len(parse(source("rss", require=rule), feed, 5)) == 2
+    rows = parse(source("rss", require_title=rule), feed, 5)
+    assert [r.url for r in rows] == ["https://example.org/a/llm"]

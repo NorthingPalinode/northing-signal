@@ -80,7 +80,9 @@ class Material(Contract):
     text: str = Field(max_length=16000)
     published_at: str | None = None
     captured_at: str = Field(default_factory=now)
-    content_kind: Literal["feed_excerpt", "release_notes", "publisher_excerpt", "search_excerpt", "index_abstract", "catalog_metadata", "community_post", "benchmark_snapshot"] = "feed_excerpt"
+    # curated_summary (2026-11-25): another site's model-written summary of a post we cannot read
+    # (AIHOT picks from X or WeChat). A model explanation, never the publisher's words.
+    content_kind: Literal["feed_excerpt", "release_notes", "publisher_excerpt", "search_excerpt", "index_abstract", "catalog_metadata", "community_post", "benchmark_snapshot", "curated_summary"] = "feed_excerpt"
     discovery_url: str | None = None
     origin: Literal["real", "synthetic"] = "real"
 

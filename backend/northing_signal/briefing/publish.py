@@ -86,6 +86,8 @@ def public_events(events, since, clock):
         latest = stamp(event.get("latest_captured_at") or event.get("captured_at"))
         if not event.get("qualified") or not latest or not since < latest <= clock:
             continue
+        if event.get("curated_only"):
+            continue  # only another site's summary of a post we could not read: not republished
         if not event.get("timely", True) and not event.get("protected"):
             continue  # found late or undated: archived, not news
         when = stamp(event.get("published_at")) or stamp(event.get("earliest_published_at")) or event_time(event)

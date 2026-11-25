@@ -35,6 +35,17 @@
 - 榜单存放在该来源的状态中（`source_states`），不新增数据表、不生成材料、不调用模型；失败时保留上一次的榜单与时间。
 - 2026-11-25 更新：按所有者要求移除 `llama.cpp · 开源发布`（`llamacpp-release`），固定来源入口现为 64 个。
 
+## 2026-11-25 补充来源（对比 AIHOT 后）
+
+对比 [AIHOT](https://github.com/KKKKhazix/AIHOT)（线上站 923 个信源，其中 X 账号 549 个、公众号 23 个，均为付费接口）后，先补免费、可直接读取的来源，固定来源入口从 64 个增至 **79 个**。每个入口都用本项目自己的采集器（同一公网读取边界与解析）实测取得带日期的条目后才加入。
+
+- **新增 RSS 11 个**：Import AI（Jack Clark）、Zvi Mowshowitz、SemiAnalysis、ChinaTalk、PyTorch 官方博客、IEEE Spectrum · AI、Platformer、Rest of World、404 Media、钛媒体、爱范儿。作者通讯是观点与转述，不作为原文依据；Zvi 与 SemiAnalysis 订阅体积 2–3 MB，单独放宽到 5 MB（采集器上限）。
+- **新增官网列表 4 个**（没有订阅，先收录链接、补读原文后整理）：Thinking Machines、Cognition（Devin / SWE 系列）、Cohere、METR。METR 的订阅带全部历史全文、约 4.7 MB，接近 5 MB 上限，改读博客列表。
+- **按标题筛选（`require_title`）**：钛媒体、爱范儿是全文订阅，正文几乎篇篇提到 AI，按正文筛选等于不筛；改为只看标题是否与 AI 相关（模型、智能体、芯片、机器人、自动驾驶及主要模型名）。实测钛媒体约 8 条/天、爱范儿约 5 条/天通过。
+- **试过但未加入**：IT之家（订阅 60 条只覆盖约 2.4 小时，一天约 600 条，每天两次更新只能看到一小段，AI 相关的也会挤占整理额度）；InfoQ 中文（订阅只有标题）；36氪、机器之心、Cohere 订阅（订阅没有条目）；Qwen 博客订阅（最新一篇停在 2025-09）；vLLM、LangChain 博客（订阅已失效或跳到网页，版本发布已由 GitHub Releases 覆盖）；Turing Post（跳转到未登记的域名）；OpenAI Alignment 博客与 PyTorch 的 `/blog/feed.xml`（404，PyTorch 改用 `/feed/`）。
+- **仍未覆盖**：X 账号与微信公众号（需付费接口或自己的令牌）、只用来衡量热度的社区来源（如 Hacker News 热门）。
+- **接入 AIHOT 精选摘要**（`aihot-selected`，`https://aihot.news/feed.xml`，所有者选择 A）：AIHOT 的其他订阅不接（精选全文与精选摘要是同一批、几乎没有全文；全部动态 50 条只覆盖约 9 小时；日报、周报、月报是同一批的汇编）。每条取原文链接：能读到原文的（官网、媒体，实测约六成）当线索，读到原文后才整理，挂在已登记官方站点的保持官方身份；原帖在 X 或公众号的（约四成）保留 AIHOT 的中文摘要，作为新的证据类型 `curated_summary`（第三方模型写的二手概括），可以进速览和更多进展，不进重点、最重要的 3 件事和公开日报，也不作为“重要更正”置顶。来源显示为「原作者 · 经 AIHOT 精选」，订阅地址不带 `aihot_actor`。热度里 AIHOT 只算一个参与方，也不计入“4 个以上新来源”。每次更新最多取 10 条（全局上限），按 AIHOT 每天约 11 条精选，两次更新足够；精选特别多的日子可能漏掉少数几条。
+
 ## 按重要性排列的未完成项
 
 | 优先级 | 来源 / 尚缺能力 | 实际限制或观察 | 当前替代与后续条件 |
@@ -106,6 +117,21 @@ X 接入依据：[近期检索](https://docs.x.com/x-api/posts/search/quickstart
 | 补充 | [LiveBench · 官方更新记录](https://github.com/LiveBench/LiveBench/blob/main/changelog.md) | 官方更新记录 | 1 / 1 |
 | 补充 | [Tencent · 模型目录与模型卡](https://huggingface.co/tencent) | 模型目录 + 有界公开模型卡 | 3 / 1 |
 | 补充 | [ModelScope · Qwen 公开目录](https://modelscope.cn/models) | 公开目录元数据 | 3 / 0 |
+| 补充 | [Thinking Machines · 官网博客](https://thinkingmachines.ai/blog/) | 官网列表 → 原文补读 | 6 / 0 |
+| 补充 | [Cognition · 官网博客](https://cognition.com/blog) | 官网列表 → 原文补读 | 6 / 0 |
+| 补充 | [Cohere · 官网博客](https://cohere.com/blog) | 官网列表 → 原文补读 | 6 / 0 |
+| 补充 | [METR · 研究与评估](https://metr.org/blog/) | 官网列表 → 原文补读 | 6 / 0 |
+| 补充 | [PyTorch · 官方博客](https://pytorch.org/feed/) | RSS | 4 / 4 |
+| 补充 | [Import AI · Jack Clark](https://importai.substack.com/feed) | RSS（作者通讯） | 4 / 4 |
+| 补充 | [Zvi Mowshowitz](https://thezvi.substack.com/feed) | RSS（作者评论，5 MB 上限） | 4 / 4 |
+| 补充 | [SemiAnalysis](https://newsletter.semianalysis.com/feed) | RSS（作者分析，5 MB 上限） | 4 / 4 |
+| 补充 | [ChinaTalk](https://www.chinatalk.media/feed) | RSS（作者分析） | 4 / 4 |
+| 补充 | [IEEE Spectrum · AI](https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss) | RSS | 6 / 6 |
+| 补充 | [Platformer](https://www.platformer.news/rss/) | RSS | 4 / 4 |
+| 补充 | [Rest of World](https://restofworld.org/feed/latest) | RSS（短摘要，需补读） | 4 / 4 |
+| 补充 | [404 Media](https://www.404media.co/rss/) | RSS | 6 / 6 |
+| 补充 | [钛媒体](https://www.tmtpost.com/rss.xml) | RSS，按标题筛 AI | 6 / 6 |
+| 补充 | [爱范儿](https://www.ifanr.com/feed) | RSS，按标题筛 AI | 6 / 6 |
 
 2026-11-24 补充：黄仁勋复任英伟达 CEO 当天，TechCrunch、The Decoder、量子位都已采集，却因相关性规则把产业新闻判为“与 AI 无关”而未进简报（已修正规则并重判）。同时补入上面六个科技与商业媒体（The Verge、Ars Technica、CNBC、MIT Technology Review、雷峰网、极客公园），固定入口增至 51 个；每源每次最多 8 条。试采时 36 氪与机器之心的 RSS 为空、虎嗅超时、VentureBeat 返回 429，未接入。
 

@@ -1,5 +1,5 @@
 {
-  "revision": "ai-sources-v3",
+  "revision": "ai-sources-v5",
   "note": "Public subscriptions, publisher indexes and bounded structured catalogs. Each refresh observes availability. Listing-only records remain leads; benchmark excerpts are not independent validation. No authenticated/paid source is enabled without project configuration.",
   "sources": [
     {
@@ -879,6 +879,236 @@
       "max_items": 15,
       "original_url": "https://github.com/search?q=topic%3Allm&type=repositories&s=stars",
       "description": "GitHub 官方搜索接口：带 AI 主题标签、star 最多的仓库，作为社区基础设施的参考榜。"
+    },
+    {
+      "id": "importai",
+      "name": "Import AI · Jack Clark",
+      "role": "author",
+      "url": "https://importai.substack.com/feed",
+      "hosts": [
+        "importai.substack.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "description": "每周 AI 研究与政策通讯（2026-11-25 加入，补 AIHOT 对比中缺的来源）。作者观点与转述，不作为原文依据。"
+    },
+    {
+      "id": "thezvi",
+      "name": "Zvi Mowshowitz · Don't Worry About the Vase",
+      "role": "author",
+      "url": "https://thezvi.substack.com/feed",
+      "hosts": [
+        "thezvi.substack.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "max_bytes": 5000000,
+      "description": "长篇 AI 动态评论与周报（2026-11-25 加入，补 AIHOT 对比中缺的来源）。观点与汇总，不作为原文依据；订阅体积大，单独放宽到 5 MB。"
+    },
+    {
+      "id": "semianalysis",
+      "name": "SemiAnalysis",
+      "role": "author",
+      "url": "https://newsletter.semianalysis.com/feed",
+      "hosts": [
+        "newsletter.semianalysis.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "max_bytes": 5000000,
+      "description": "芯片、算力与数据中心分析（2026-11-25 加入，补 AIHOT 对比中缺的来源）。多为付费文章的公开开头，作者分析不等于原文依据。"
+    },
+    {
+      "id": "chinatalk",
+      "name": "ChinaTalk",
+      "role": "author",
+      "url": "https://www.chinatalk.media/feed",
+      "hosts": [
+        "www.chinatalk.media"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "description": "中国科技与 AI 政策分析（2026-11-25 加入，补 AIHOT 对比中缺的来源）。非 AI 内容由整理判为无关。"
+    },
+    {
+      "id": "metr",
+      "name": "METR · 研究与评估",
+      "role": "research",
+      "url": "https://metr.org/blog/",
+      "hosts": [
+        "metr.org"
+      ],
+      "kind": "publisher_index",
+      "priority": 1,
+      "article_hosts": [
+        "metr.org"
+      ],
+      "path_pattern": "^/blog/\\d{4}-\\d{2}-\\d{2}-[^/]+/?$",
+      "max_items": 6,
+      "description": "前沿模型能力与风险评估机构（2026-11-25 加入，补 AIHOT 对比中缺的来源）。它的订阅带全部历史全文、超过 5 MB 上限，所以读博客列表，补读原文后整理。"
+    },
+    {
+      "id": "pytorch-blog",
+      "name": "PyTorch · 官方博客",
+      "role": "official",
+      "url": "https://pytorch.org/feed/",
+      "hosts": [
+        "pytorch.org"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "description": "PyTorch 基金会与框架官方博客（2026-11-25 加入，补 AIHOT 对比中缺的来源）。"
+    },
+    {
+      "id": "thinkingmachines-news",
+      "name": "Thinking Machines · 官网博客",
+      "role": "official",
+      "url": "https://thinkingmachines.ai/blog/",
+      "hosts": [
+        "thinkingmachines.ai"
+      ],
+      "kind": "publisher_index",
+      "priority": 1,
+      "article_hosts": [
+        "thinkingmachines.ai"
+      ],
+      "path_pattern": "^/blog/[^/]+/?$",
+      "max_items": 6,
+      "description": "官网没有订阅，先收录列表里的文章链接，补读原文后才整理（2026-11-25 加入，补 AIHOT 对比中缺的来源）。"
+    },
+    {
+      "id": "cognition-news",
+      "name": "Cognition · 官网博客",
+      "role": "official",
+      "url": "https://cognition.com/blog",
+      "hosts": [
+        "cognition.com"
+      ],
+      "kind": "publisher_index",
+      "priority": 1,
+      "article_hosts": [
+        "cognition.com"
+      ],
+      "path_pattern": "^/blog/[^/]+/?$",
+      "max_items": 6,
+      "max_bytes": 3000000,
+      "description": "Devin / SWE 系列模型的官方发布，先收录链接、补读原文后整理（2026-11-25 加入，补 AIHOT 对比中缺的来源）。"
+    },
+    {
+      "id": "cohere-news",
+      "name": "Cohere · 官网博客",
+      "role": "official",
+      "url": "https://cohere.com/blog",
+      "hosts": [
+        "cohere.com"
+      ],
+      "kind": "publisher_index",
+      "priority": 1,
+      "article_hosts": [
+        "cohere.com"
+      ],
+      "path_pattern": "^/blog/[^/]+/?$",
+      "max_items": 6,
+      "max_bytes": 3000000,
+      "description": "Cohere 模型与企业产品发布，先收录链接、补读原文后整理（2026-11-25 加入，补 AIHOT 对比中缺的来源）。"
+    },
+    {
+      "id": "ieee-spectrum-ai",
+      "name": "IEEE Spectrum · AI",
+      "role": "media",
+      "url": "https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss",
+      "hosts": [
+        "spectrum.ieee.org"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "description": "IEEE 旗下技术媒体的 AI 栏目（2026-11-25 加入，补 AIHOT 对比中缺的来源）。"
+    },
+    {
+      "id": "platformer",
+      "name": "Platformer",
+      "role": "media",
+      "url": "https://www.platformer.news/rss/",
+      "hosts": [
+        "www.platformer.news"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "description": "科技平台与 AI 产业报道（2026-11-25 加入，补 AIHOT 对比中缺的来源）。非 AI 内容由整理判为无关。"
+    },
+    {
+      "id": "restofworld",
+      "name": "Rest of World",
+      "role": "media",
+      "url": "https://restofworld.org/feed/latest",
+      "hosts": [
+        "restofworld.org"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 4,
+      "description": "欧美以外地区的科技与 AI 报道（2026-11-25 加入，补 AIHOT 对比中缺的来源）。订阅只有短摘要，需补读原文。"
+    },
+    {
+      "id": "404media",
+      "name": "404 Media",
+      "role": "media",
+      "url": "https://www.404media.co/rss/",
+      "hosts": [
+        "www.404media.co"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "description": "独立科技调查媒体（2026-11-25 加入，补 AIHOT 对比中缺的来源）。非 AI 内容由整理判为无关。"
+    },
+    {
+      "id": "tmtpost",
+      "name": "钛媒体",
+      "role": "media",
+      "url": "https://www.tmtpost.com/rss.xml",
+      "hosts": [
+        "www.tmtpost.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "require_title": "(?i)(?<![a-z])(ai|aigc|agi|llms?|gpts?|chatgpt|openai|anthropic|claude|gemini|deepseek|qwen|kimi|llama|copilot|agents?|agentic|nvidia|gpu|robot(?:s|ics)?|seedance|sora|veo)(?![a-z])|人工智能|大模型|模型|智能体|机器人|具身|自动驾驶|智驾|生成式|算力|芯片|英伟达|豆包|通义|文心|混元|元宝|智谱|月之暗面|千问|可灵|即梦",
+      "description": "综合科技与商业媒体（2026-11-25 加入，补 AIHOT 对比中缺的来源）：全文订阅几乎篇篇提到 AI，所以只按标题保留 AI 相关文章。"
+    },
+    {
+      "id": "ifanr",
+      "name": "爱范儿",
+      "role": "media",
+      "url": "https://www.ifanr.com/feed",
+      "hosts": [
+        "www.ifanr.com"
+      ],
+      "kind": "rss",
+      "priority": 1,
+      "max_items": 6,
+      "require_title": "(?i)(?<![a-z])(ai|aigc|agi|llms?|gpts?|chatgpt|openai|anthropic|claude|gemini|deepseek|qwen|kimi|llama|copilot|agents?|agentic|nvidia|gpu|robot(?:s|ics)?|seedance|sora|veo)(?![a-z])|人工智能|大模型|模型|智能体|机器人|具身|自动驾驶|智驾|生成式|算力|芯片|英伟达|豆包|通义|文心|混元|元宝|智谱|月之暗面|千问|可灵|即梦",
+      "description": "消费科技媒体（2026-11-25 加入，补 AIHOT 对比中缺的来源）：只按标题保留 AI 相关文章。"
+    },
+    {
+      "id": "aihot-selected",
+      "name": "AIHOT · 精选摘要",
+      "role": "community",
+      "url": "https://aihot.news/feed.xml",
+      "hosts": [
+        "aihot.news"
+      ],
+      "kind": "aihot",
+      "priority": 1,
+      "max_items": 50,
+      "description": "AIHOT（aihot.news，923 个信源）每天的编辑精选，2026-11-25 按所有者选择 A 接入。能读到原文的只当线索，读到原文后才整理；原帖在 X 或公众号、读不到的，依据 AIHOT 的中文摘要整理并标明，只进速览和更多进展，不进重点，不进公开日报。AIHOT 只算一个参与方。"
     }
   ]
 }

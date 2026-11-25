@@ -175,6 +175,11 @@ export default function StoryReader({
           {story.protected && (
             <span className="r-badge warn">重要{actionLabel[story.action]}</span>
           )}
+          {story.aihot && (
+            <span className="r-badge aihot" title="AIHOT（aihot.news）的编辑精选也选了这条">
+              AIHOT 精选
+            </span>
+          )}
           {story.policy_stale && (
             <span className="r-badge">按旧版规则整理，待重新整理</span>
           )}
@@ -221,6 +226,11 @@ export default function StoryReader({
                   <a href={t.url} target="_blank" rel="noreferrer">
                     {t.title}
                   </a>
+                  {t.via && (
+                    <a className="r-link small r-via" href={t.via} target="_blank" rel="noreferrer">
+                      在 AIHOT 查看
+                    </a>
+                  )}
                   {!historical && canRegroup && story.timeline.length > 1 && (
                     <button
                       className="r-link small"
