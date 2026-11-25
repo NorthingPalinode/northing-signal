@@ -152,7 +152,17 @@ export const matchesStory = (story: Story, topic: string, query: string) =>
       .toLowerCase()
       .includes(query.toLowerCase()));
 
-/** Split the projected view into the lists each page renders. */
+/** Briefing order: urgent corrections first, then the engine's score; newest first among equals.
+ * `rows` must already be newest first (the sort is stable). */
+function byImportance<T extends Pick<Story, "score" | "protected">>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => Number(!!b.protected) - Number(!!a.protected) || (b.score ?? 0) - (a.score ?? 0),
+  );
+}
+
+/** Split the projected view into the lists each page renders. The briefing's sections keep the
+ * engine's importance order (focus and radar exactly as it chose them, 更多进展 by score); search,
+ * saved stories, follows and the archive are newest first. */
 export function sections(
   view: View | null,
   topic: string,
@@ -164,20 +174,24 @@ export function sections(
   const saved = view?.saved_events || view?.events.filter((e) => e.saved) || [];
   const follows = view?.follows || [];
   const followed = follows.find((f) => f.id === selectedFollow) || follows[0];
+  const byId = new Map(events.map((e) => [e.id, e]));
+  const picked = (ids: string[] = []) => ids.map((id) => byId.get(id)).filter((e): e is Story => !!e);
   return {
     events,
-    focus: events.filter((e) => view?.focus.includes(e.id)),
-    radar: events.filter((e) => view?.radar.includes(e.id)),
+    focus: picked(view?.focus),
+    radar: picked(view?.radar),
     discover: events.filter((e) => e.qualified && !e.dismissed),
     /** Qualified news the briefing did not already show as focus or radar. Late finds and
      * undated reports stay out of the briefing; search still finds them. */
-    more: events.filter(
-      (e) =>
-        e.qualified &&
-        !e.dismissed &&
-        e.timely !== false &&
-        !view?.focus.includes(e.id) &&
-        !view?.radar.includes(e.id),
+    more: byImportance(
+      events.filter(
+        (e) =>
+          e.qualified &&
+          !e.dismissed &&
+          e.timely !== false &&
+          !view?.focus.includes(e.id) &&
+          !view?.radar.includes(e.id),
+      ),
     ),
     follows,
     followed,
@@ -408,6 +422,90 @@ export function dayLabel(value?: string | null, capturedAt?: string) {
   return `${d.month}月${d.day}日`;
 }
 
+/** A newest-first line grouped by publication day. Stories without a publication date come
+ * last under one "发布日期未知" heading: their collection day is not when they happened, and
+ * labelling them by it would repeat a day heading further down the line. */
+export function lineDays<T extends NewsDate>(rows: T[]): { day: string; stories: T[] }[] {
+  const days: { day: string; stories: T[] }[] = [];
+  for (const row of rows) {
+    const day = Number.isFinite(Date.parse(row.published_at ?? "")) ? dayLabel(row.published_at) : "发布日期未知";
+    const same = days.find((d) => d.day === day);
+    if (same) same.stories.push(row);
+    else days.push({ day, stories: [row] });
+  }
+  return days;
+}
+
+const IMPLIED_PRODUCTS = new Set(["research", "corporate"]);
+
+/** Strip trailing full-width parentheticals ("ChatGPT（含 Codex）" -> "ChatGPT") for compact badges. */
+export function shortProductName(name: string) {
+  return name.replace(/（[^）]*）\s*$/, "").trim() || name;
+}
+
+export type CompanyCatalogEntry = NonNullable<View["companies"]>[number];
+
+export type CompanyCard = {
+  id: string;
+  name: string;
+  productSummary: string;
+  products: { id: string; name: string; shortName: string; count: number }[];
+  total: number;
+  officialCount: number;
+  majorCount: number;
+  freshCount: number;
+  mentionCount: number;
+  latest: Story[];
+};
+
+/** Overview cards for every company in the catalog: active ones ranked by move count, quiet ones after. */
+export function companyCards(
+  catalog: CompanyCatalogEntry[],
+  events: Story[],
+  previousVisit?: string | null,
+): { active: CompanyCard[]; quiet: CompanyCard[] } {
+  const counts = lineCounts(events);
+  const active: CompanyCard[] = [];
+  const quiet: CompanyCard[] = [];
+  for (const entry of catalog) {
+    const line = companyLine(events, entry.id);
+    const mentions = companyMentions(events, entry.id);
+    const { products: prodCounts } = lineCounts(events, entry.id);
+    const explicit = entry.products.filter((p) => !IMPLIED_PRODUCTS.has(p.id));
+    const productSummary = explicit.map((p) => shortProductName(p.name)).join(" · ");
+    const products = entry.products
+      .filter((p) => prodCounts[p.id] > 0)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        shortName: shortProductName(p.name),
+        count: prodCounts[p.id],
+      }))
+      .sort((a, b) => b.count - a.count);
+    const officialCount = line.filter(
+      (s) => s.companies?.find((c) => c.id === entry.id)?.official,
+    ).length;
+    const majorCount = line.filter(isMajor).length;
+    const freshCount = (sinceVisit(line, previousVisit) || []).length;
+    const card: CompanyCard = {
+      id: entry.id,
+      name: entry.name,
+      productSummary,
+      products,
+      total: counts.companies[entry.id] || 0,
+      officialCount,
+      majorCount,
+      freshCount,
+      mentionCount: mentions.length,
+      latest: line.slice(0, 2),
+    };
+    if (card.total > 0) active.push(card);
+    else quiet.push(card);
+  }
+  active.sort((a, b) => b.total - a.total);
+  return { active, quiet };
+}
+
 /* ---------- one story's evidence, stage by stage ---------- */
 
 export type Stage = "statement" | "test" | "change" | "coverage";
@@ -516,4 +614,73 @@ export function repoMeta(row: RepoRow, rankingId: string) {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** Companies in the sidebar: the reader's own list in their order (companies no longer in the
+ * catalog drop out), or, when they have not chosen, the four most active. */
+export const DRAWER_AUTO = 4;
+export const DRAWER_MAX = 8;
+export function drawerCompanies(
+  cards: { active: CompanyCard[]; quiet: CompanyCard[] },
+  chosen?: string[] | null,
+): CompanyCard[] {
+  if (!chosen) return cards.active.slice(0, DRAWER_AUTO);
+  const all = new Map([...cards.active, ...cards.quiet].map((c) => [c.id, c]));
+  return chosen.map((id) => all.get(id)).filter((c): c is CompanyCard => !!c);
+}
+
+/* ---------- evidence chart: one lane per source, one column per day ---------- */
+
+export type Mark = Stage | "opinion";
+
+/** Layout for the story's evidence chart. x runs 0..1 from the first report's day to `now`, so
+ * "现在" is always the right edge and no empty future days are drawn; the chart starts at least two
+ * days before today so a fresh story still has room. Lanes are sources in order of first
+ * appearance, the ninth and later grouped as "其他来源". Undated reports are left out and counted. */
+export function evidenceLanes(story: Story, now = new Date(), maxLanes = 8) {
+  const { nodes } = evidenceStages(story);
+  const time = (n: (typeof nodes)[number]) =>
+    Date.parse(n.entry.published_at ?? "") || Date.parse(n.entry.captured_at ?? "") || NaN;
+  const dated = nodes.filter((n) => Number.isFinite(time(n)));
+  const undated = nodes.length - dated.length;
+  if (!dated.length) return { lanes: [], points: [], days: [], official: null, now: 1, undated };
+  const dayStart = (t: number) => {
+    const d = zoned(t);
+    return t - (d.hour * 3600 + d.minute * 60) * 1000 - (t % 60000);
+  };
+  const times = dated.map(time);
+  const first = Math.min(...times);
+  const start = Math.min(dayStart(first), dayStart(now.getTime()) - 2 * 86400000);
+  // A report dated after "now" (clock skew) still fits instead of falling off the edge.
+  const end = Math.max(now.getTime(), ...times);
+  const span = end - start;
+  const x = (t: number) => Math.min(1, Math.max(0, (t - start) / span));
+  const sources = [...new Set(dated.map((n) => n.entry.source))];
+  const lanes =
+    sources.length > maxLanes ? [...sources.slice(0, maxLanes - 1), "其他来源"] : sources;
+  const lane = (source: string) => {
+    const i = lanes.indexOf(source);
+    return i >= 0 ? i : lanes.length - 1;
+  };
+  const points = dated.map((n) => ({
+    x: x(time(n)),
+    lane: lane(n.entry.source),
+    mark: (n.stage === "coverage" && n.entry.evidence === "opinion" ? "opinion" : n.stage) as Mark,
+    label: n.label,
+    entry: n.entry,
+  }));
+  const days: { x: number; label: string }[] = [];
+  for (let t = start; t < end; t += 86400000) days.push({ x: x(t), label: dayLabel(new Date(t).toISOString()) });
+  const official = points.find((p) => p.mark === "statement");
+  return { lanes, points, days, official: official ? official.x : null, now: x(now.getTime()), undated };
+}
+
+/** 快速翻阅: briefing stories not yet known, dismissed or seen twice, in briefing order. */
+export function deckStories(list: Story[]) {
+  const seen = new Set<string>();
+  return list.filter((s) => {
+    if (seen.has(s.id) || s.known || s.dismissed) return false;
+    seen.add(s.id);
+    return true;
+  });
 }

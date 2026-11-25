@@ -1,0 +1,150 @@
+/* Northing Signal design tokens — the only place colours, radii, shadows and motion are defined.
+   Contract: docs/design/DESIGN.md · visual source of truth: docs/design/preview/northing-signal.html */
+
+:root {
+  color-scheme: light;
+
+  /* wallpaper behind the drawer and the window */
+  --wall-a: #dfe3e8;
+  --wall-b: #e9e2d8;
+  --wall-c: #d6ded6;
+  --blob-1: #b9c9e6;
+  --blob-2: #efd5c0;
+  --blob-3: #c4dccd;
+  --blob-opacity: 0.75;
+
+  /* surfaces */
+  --win: rgb(255 255 255 / 88%);
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --well: #f2f3f5;
+  --well-2: #e9ebef;
+  --drawer-glass: rgb(246 247 249 / 84%);
+  --drawer-pill: rgb(255 255 255 / 88%);
+  --drawer-hover: rgb(255 255 255 / 40%);
+
+  /* text */
+  --ink: #1b1e24;
+  --ink-2: #4a505b;
+  --muted: #677079;
+  --faint: #a9aeb7;
+
+  /* lines */
+  --line: rgb(27 30 36 / 8%);
+  --line-2: rgb(27 30 36 / 14%);
+
+  /* accent and status */
+  --accent: #2f63f0;
+  --accent-hover: #2756d8;
+  --accent-ink: #ffffff;
+  /* Text on the white chips that sit on coloured bands (deck cards); the same in both themes. */
+  --on-chip: #1b1e24;
+  --accent-soft: rgb(47 99 240 / 9%);
+  --accent-ring: rgb(47 99 240 / 18%);
+  --ok: #0e9f78;
+  --ok-text: #0b7a5c;
+  --ok-soft: rgb(14 159 120 / 11%);
+  --warn: #c27a06;
+  --warn-text: #93580a;
+  --warn-soft: rgb(194 122 6 / 11%);
+  --danger: #d9482b;
+  --danger-text: #b3361d;
+  --danger-soft: rgb(217 72 43 / 10%);
+
+  /* topics */
+  --t-models: #6b56e8;
+  --t-agents: #0e9a74;
+  --t-research: #c97f08;
+  --t-engineering: #2f63f0;
+  --t-products: #d63c7d;
+  --t-industry: #dc5a32;
+
+  /* type */
+  --font: Inter, -apple-system, "Segoe UI Variable", "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+
+  /* shape */
+  --r-sm: 8px;
+  --r-md: 11px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-win: 16px;
+
+  /* elevation */
+  --shadow-card: 0 0 0 1px var(--line), 0 1px 3px rgb(27 30 36 / 5%);
+  --shadow-hover: 0 0 0 1px var(--line-2), 0 18px 40px -18px rgb(27 30 36 / 28%);
+  --shadow-pill: 0 1px 2px rgb(27 30 36 / 8%), 0 4px 14px -4px rgb(27 30 36 / 12%);
+  --shadow-win: 0 0 0 1px rgb(255 255 255 / 70%), 0 1px 2px rgb(27 30 36 / 6%), 0 30px 80px -30px rgb(27 30 36 / 30%);
+  --shadow-pop: 0 0 0 1px var(--line), 0 30px 70px -20px rgb(27 30 36 / 35%);
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --fast: 140ms;
+  --base: 220ms;
+  --slow: 380ms;
+
+  /* layout */
+  --drawer-w: 264px;
+  --content-w: 1040px;
+  --reading-w: 820px;
+}
+
+/* Dark palette. `data-theme` on <html> is set before the first paint (index.html) from the
+   reader's choice on this device: 浅色, 深色 or 跟随系统 (theme.ts). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --wall-a: #0e1013;
+  --wall-b: #15161a;
+  --wall-c: #101413;
+  --blob-1: #1f2c48;
+  --blob-2: #3a2a20;
+  --blob-3: #1b3329;
+  --blob-opacity: 0.55;
+
+  --win: rgb(22 24 28 / 90%);
+  --surface: #1c1f24;
+  --surface-2: #22262c;
+  --well: #262a31;
+  --well-2: #2e333b;
+  --drawer-glass: rgb(26 28 33 / 88%);
+  --drawer-pill: rgb(255 255 255 / 9%);
+  --drawer-hover: rgb(255 255 255 / 5%);
+
+  --ink: #eceef1;
+  --ink-2: #b5bac3;
+  --muted: #949aa4;
+  --faint: #5c626b;
+
+  --line: rgb(255 255 255 / 8%);
+  --line-2: rgb(255 255 255 / 14%);
+
+  --accent: #7097ff;
+  --accent-hover: #86a8ff;
+  --accent-ink: #0d1220;
+  --accent-soft: rgb(112 151 255 / 15%);
+  --accent-ring: rgb(112 151 255 / 28%);
+  --ok: #3fd0a0;
+  --ok-text: #5fdcb2;
+  --ok-soft: rgb(63 208 160 / 14%);
+  --warn: #e8a93b;
+  --warn-text: #f0bd62;
+  --warn-soft: rgb(232 169 59 / 14%);
+  --danger: #ff7a5c;
+  --danger-text: #ff9479;
+  --danger-soft: rgb(255 122 92 / 14%);
+
+  --t-models: #a594ff;
+  --t-agents: #4fd3a8;
+  --t-research: #ebb455;
+  --t-engineering: #7aa5ff;
+  --t-products: #f08bb6;
+  --t-industry: #f58f6c;
+
+  --shadow-card: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-hover: 0 0 0 1px var(--line-2), 0 18px 40px -18px rgb(0 0 0 / 70%);
+  --shadow-pill: 0 0 0 1px var(--line), 0 4px 14px -4px rgb(0 0 0 / 50%);
+  --shadow-win: 0 0 0 1px rgb(255 255 255 / 6%), 0 30px 80px -30px rgb(0 0 0 / 70%);
+  --shadow-pop: 0 0 0 1px var(--line-2), 0 30px 70px -20px rgb(0 0 0 / 70%);
+}

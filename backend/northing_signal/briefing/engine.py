@@ -84,6 +84,12 @@ def active_actions(interactions):
 
 
 LATE_HOURS = 48  # found later than this after publication: archived, not news (AIHOT's rule)
+# Carried stories (2026-11-25, after AIHOT's daily edition): an event an earlier briefing already put
+# in focus or radar, which the reader saw there and did not open, does not take a briefing place
+# again. It returns only with news of its own since the reader saw it: a report from an official or
+# research source, or reports from RETURN_SOURCES new outlets. Otherwise it waits in 更多进展, lower.
+RETURN_SOURCES = 4
+CARRIED_PENALTY = 6
 SELECT_THRESHOLD = 9  # significance*3 + novelty*2 + usefulness a story needs (see calibrate.py)
 
 
@@ -174,7 +180,8 @@ def standing(timeline, source_count=1):
 
 
 def project(materials, judgments, preferences, interactions=(), *, as_of=None, membership=None,
-            briefing_at=None, new_since=None, refreshed=(), late_hours=None, thresholds=None):
+            briefing_at=None, new_since=None, refreshed=(), late_hours=None, thresholds=None,
+            briefed=frozenset()):
     """membership: material id -> stored event id. Without it, events are derived as before.
 
     briefing_at: when the current briefing was made (the latest completed update). "Known" marked
@@ -183,6 +190,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
     refreshed: completion times of earlier updates; late_hours: source id -> hours a report may
     take to be found and still count as news (default LATE_HOURS). thresholds: threshold group
     -> minimum score (default SELECT_THRESHOLD), set from the owner's calibration.
+    briefed: event ids that earlier briefings (before new_since) put in focus or radar.
     """
     thresholds = thresholds or {}
     refreshed = sorted(t for t in (stamp(v) if isinstance(v, str) else v for v in refreshed) if t)
@@ -225,6 +233,12 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         groups[group].append((material, assessment, row))
 
     actions = active_actions(interactions)
+    # When the reader last saw each event on screen before this briefing began (see RETURN_SOURCES).
+    last_shown = {}
+    for action in actions:
+        at = stamp(action.get("at")) if action["kind"] == "shown" and fresh_from else None
+        if at and at < fresh_from:
+            last_shown[action["event_id"]] = max(at, last_shown.get(action["event_id"], at))
     affinities = defaultdict(float)
     event_topics = {key: members[0][1].topic for key, members in groups.items()}
     seen_feedback = set()
@@ -278,6 +292,12 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         latest_captured = max(m.captured_at for m, _, _ in members)
         dismissed = any(r["kind"] in {"irrelevant", "thin", "duplicate"} for r in recent_actions)
         protected = urgent(a) and not known_earlier
+        seen_at = last_shown.get(event_id) if event_id in briefed else None
+        carried = False
+        if seen_at and not protected:
+            since_seen = [m for m in found_fresh if stamp(m.captured_at) > seen_at]
+            carried = not (any(m.source_role in {"official", "research"} for m in since_seen)
+                           or len({m.source_id for m in since_seen}) >= RETURN_SOURCES)
         score = value + (7 if relevant else -3) + (3 * math.exp(-age_days / 7) if dated else 0)
         score += max(-3, min(3, affinities[a.topic]))
         reports = [(m.source_id, stamp(m.published_at)) for m in found_fresh]
@@ -292,6 +312,8 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             score -= 16
         if dismissed:
             score -= 20
+        if carried:
+            score -= CARRIED_PENALTY
         timeline = [{"version": m.version, "title": b.title or m.title, "summary": b.summary,
                      "source": m.source_name, "source_id": m.source_id, "role": m.source_role, "url": m.url,
                      "published_at": m.published_at, "captured_at": m.captured_at, "action": b.action,
@@ -313,7 +335,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
             "source_count": len({m.source_id for m, _, _ in members}), "report_count": len(members),
             "standing": standing(timeline, len({m.source_id for m, _, _ in members})),
             "qualified": qualified, "protected": protected, "known": known, "dismissed": dismissed,
-            "roundup": roundup,
+            "roundup": roundup, "carried": carried,
             "known_earlier": known_earlier, "first_captured_at": first_captured,
             "latest_captured_at": latest_captured, "dated": dated, "timely": is_timely,
             "stale_reason": None if is_timely else "late" if dated else "undated",
@@ -336,6 +358,7 @@ def project(materials, judgments, preferences, interactions=(), *, as_of=None, m
         })
     events.sort(key=lambda row: (not row["protected"], -row["score"], row["id"]))
     eligible = [e for e in events if e["qualified"] and not e["dismissed"] and not e["known_earlier"]
+                and not e["carried"]
                 and (e["relevant"] or preferences.exploration) and (e["age_days"] <= 30 or e["protected"])
                 and (e["timely"] or e["protected"])]
     focus, radar, spent = [], [], 0

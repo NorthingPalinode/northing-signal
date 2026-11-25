@@ -703,3 +703,15 @@ def test_search_post_does_not_redirect_credentials(monkeypatch):
             await collection.fetch("https://api.anysearch.com/v1/search",{"api.anysearch.com"},method="POST",payload={"query":"test"},headers={"Authorization":"Bearer synthetic-key"})
         assert len(requests) == 1 and requests[0].headers["host"] == "api.anysearch.com"
     asyncio.run(scenario())
+
+
+def test_sidebar_companies_are_an_optional_ordered_preference(tmp_path):
+    import pytest
+    from northing_signal.briefing.store import Store
+    assert Preferences().drawer_companies is None  # earlier rows: the four most active
+    store = Store(tmp_path / "reader.db")
+    store.save_preferences(Preferences(drawer_companies=["nvidia", "openai"]))
+    assert store.preferences().drawer_companies == ["nvidia", "openai"]
+    for bad in (["openai", "openai"], ["Open AI"]):
+        with pytest.raises(ValueError):
+            Preferences(drawer_companies=bad)

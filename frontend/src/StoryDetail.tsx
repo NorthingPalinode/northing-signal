@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Glyph } from "./ui";
+import EvidenceChart from "./EvidenceChart";
 import {
   actionLabel,
   evidence,
-  evidenceChecklist,
   evidenceStages,
   hasAction,
   mergeCandidates,
@@ -203,12 +203,9 @@ export default function StoryReader({
         )}
 
         <section className="r-evidence">
-          <h2>
-            证据时间线
-            <small>
-              {story.report_count} 篇报道 · {story.source_count} 个来源
-            </small>
-          </h2>
+          <EvidenceChart story={story} />
+          <details className="r-fold r-stage-fold" open={stages.nodes.length <= 4}>
+            <summary>逐条查看 {stages.nodes.length} 篇报道{stages.gaps.length ? ` · ${stages.gaps.join("，")}` : ""}</summary>
           <ol className="r-stages">
             {stages.nodes.map(({ entry: t, stage, label, day }) => (
               <li key={t.version} className={"r-stage s-" + stage}>
@@ -254,6 +251,7 @@ export default function StoryReader({
               </li>
             ))}
           </ol>
+          </details>
         </section>
 
         <section>
@@ -393,15 +391,6 @@ export default function StoryReader({
               {story.report_count} 篇 · {story.source_count} 个来源
             </dd>
           </dl>
-          <ul className="r-checklist" aria-label="依据清单">
-            {evidenceChecklist(story).map((item) => (
-              <li key={item.label} className={item.ok ? "ok" : ""}>
-                <Glyph name={item.ok ? "check" : "minus"} size={14} />
-                {item.label}
-                <span className="r-visually-hidden">{item.ok ? "：有" : "：未见"}</span>
-              </li>
-            ))}
-          </ul>
           <a
             className="r-button block"
             href={story.url}

@@ -1,7 +1,7 @@
 """Export the retired 0.2 personal database (goals, runs, decisions, articles) to JSON Lines.
 
-The old runtime was removed from the main branch; its code is kept on the
-`archive/research-g1-g4` branch. This script needs only the standard library,
+The old runtime was removed from the main branch; its code remains in the history
+at commit 287e2c6. This script needs only the standard library,
 opens the database read-only and never changes or deletes it.
 
     python scripts/export_legacy.py [--db .local/cfaw-news.db] [--out .local/legacy-export]

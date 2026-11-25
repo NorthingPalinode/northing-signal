@@ -3,6 +3,7 @@
 import hashlib
 import ipaddress
 import json
+import re
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -134,6 +135,16 @@ class Preferences(Contract):
     auto_refresh: bool = True
     # Shown dates and weekly ranges; empty follows the site timezone (READER_TIMEZONE).
     timezone: str = ""
+    # Companies in the sidebar, in the reader's order (2026-11-25). None: the four most active.
+    drawer_companies: list[str] | None = Field(default=None, max_length=12)
+
+    @field_validator("drawer_companies")
+    @classmethod
+    def valid_companies(cls, value):
+        if value is not None and (len(set(value)) != len(value)
+                                  or any(not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,39}", c) for c in value)):
+            raise ValueError("侧栏公司不能重复，且需是公司列表里的公司")
+        return value
 
     @field_validator("timezone")
     @classmethod

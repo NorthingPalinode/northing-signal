@@ -14,13 +14,19 @@ import {
   setDisplayZone,
   siteZoneLabel,
   sinceVisit,
+  companyCards,
   companyLine,
   companyMentions,
   evidenceChecklist,
   evidenceStages,
+  evidenceLanes,
+  deckStories,
+  drawerCompanies,
   lensStories,
   lineCounts,
+  lineDays,
   pageFromHash as pageOf,
+  shortProductName,
   trendFromHash,
   trendHash,
   repoMeta,
@@ -67,7 +73,7 @@ test("story hashes open a reading page with its neighbours", () => {
   assert.deepEqual(neighbours(["a"], "x"), { index: -1, prev: "", next: "" });
 });
 
-test("news is newest first within each section and respects filters", () => {
+test("briefing sections keep the engine's importance order; other lists are newest first", () => {
   const earlier = story("a", { published_at: "2026-11-02T10:00:00+08:00", captured_at: "2026-11-10T00:00:00Z" });
   const later = story("c", { published_at: "unconfirmed", captured_at: "2026-11-02T03:00:00Z" });
   const latest = story("b", { topic: "agents", published_at: "2026-11-02T04:00:00Z" });
@@ -75,9 +81,10 @@ test("news is newest first within each section and respects filters", () => {
   const events = [earlier, undated, latest, later];
   const value = view(events, { focus: ["a", "c"], radar: ["d", "b"], saved_events: [earlier, later] });
   const all = sections(value, "", "", "");
-  // Undated stories follow dated ones: collection time does not make them news (Kimi K3, 2026-11-23).
+  // Focus and radar keep the order the engine chose them in, whatever their dates.
   assert.deepEqual(all.focus.map((e) => e.id), ["a", "c"]);
-  assert.deepEqual(all.radar.map((e) => e.id), ["b", "d"]);
+  assert.deepEqual(all.radar.map((e) => e.id), ["d", "b"]);
+  // Undated stories follow dated ones: collection time does not make them news (Kimi K3, 2026-11-23).
   assert.deepEqual(all.discover.map((e) => e.id), ["b", "a", "c", "d"]);
   assert.deepEqual(all.saved.map((e) => e.id), ["a", "c"]);
   assert.deepEqual(value.events.map((e) => e.id), ["a", "d", "b", "c"]);
@@ -278,6 +285,99 @@ test("a company line holds what it did; mentions and dismissed stories stay off 
   assert.deepEqual(counts.products, { chatgpt: 1, api: 2 });
 });
 
+test("a company line is grouped newest day first; undated stories close it under one heading", () => {
+  setDisplayZone("UTC");
+  const own = (id: string, changes: Partial<Story>) =>
+    story(id, { companies: [{ id: "openai", official: true, products: [] }], ...changes });
+  const line = companyLine(
+    [
+      own("old", { published_at: "2026-11-23T08:00:00Z" }),
+      // Collected on the 24th, published on an unknown day: it must not reopen "11月24日".
+      own("undated", { published_at: null, captured_at: "2026-11-24T16:00:00Z" }),
+      own("new", { published_at: "2026-11-24T14:00:00Z" }),
+      own("same-day", { published_at: "2026-11-23T21:00:00Z" }),
+    ],
+    "openai",
+  );
+  assert.deepEqual(
+    lineDays(line).map((d) => [d.day, d.stories.map((s) => s.id)]),
+    [["11月24日", ["new"]], ["11月23日", ["same-day", "old"]], ["发布日期未知", ["undated"]]],
+  );
+});
+
+test("company overview cards rank active companies, summarise explicit products and separate quiet ones", () => {
+  assert.equal(shortProductName("ChatGPT（含 Codex）"), "ChatGPT");
+  assert.equal(shortProductName("Sora"), "Sora");
+  const catalog = [
+    {
+      id: "anthropic",
+      name: "Anthropic",
+      products: [
+        { id: "claude", name: "Claude（应用与模型）" },
+        { id: "claude-code", name: "Claude Code" },
+        { id: "research", name: "研究与安全" },
+        { id: "corporate", name: "公司与政策" },
+      ],
+    },
+    {
+      id: "openai",
+      name: "OpenAI",
+      products: [
+        { id: "chatgpt", name: "ChatGPT（含 Codex）" },
+        { id: "api", name: "API 与模型" },
+        { id: "research", name: "研究与安全" },
+        { id: "corporate", name: "公司与政策" },
+      ],
+    },
+    {
+      id: "apple",
+      name: "Apple",
+      products: [
+        { id: "apple-intelligence", name: "Apple Intelligence 与 Siri" },
+        { id: "research", name: "研究与安全" },
+      ],
+    },
+  ];
+  const since = "2026-11-22T00:00:00Z";
+  const events = [
+    story("o1", {
+      published_at: "2026-11-24T00:00:00Z",
+      first_captured_at: "2026-11-24T01:00:00Z",
+      action: "release",
+      companies: [{ id: "openai", official: true, products: ["chatgpt", "api"] }],
+      lenses: ["company"],
+    }),
+    story("o2", {
+      published_at: "2026-11-23T00:00:00Z",
+      first_captured_at: "2026-11-21T01:00:00Z",
+      action: "explain",
+      companies: [{ id: "openai", official: false, products: ["api"] }],
+      lenses: ["company"],
+    }),
+    story("a1", {
+      published_at: "2026-11-24T02:00:00Z",
+      first_captured_at: "2026-11-24T02:30:00Z",
+      action: "release",
+      companies: [{ id: "anthropic", official: true, products: ["claude-code"] }],
+      lenses: ["company"],
+    }),
+    story("m1", { mentions: ["apple"], lenses: [] }),
+  ];
+  const { active, quiet } = companyCards(catalog, events, since);
+  assert.deepEqual(active.map((c) => c.id), ["openai", "anthropic"]);
+  assert.equal(active[0].total, 2);
+  assert.equal(active[0].officialCount, 1);
+  assert.equal(active[0].majorCount, 1);
+  assert.equal(active[0].freshCount, 1);
+  assert.equal(active[0].productSummary, "ChatGPT · API 与模型");
+  assert.deepEqual(active[0].products.map((p) => [p.shortName, p.count]), [
+    ["API 与模型", 2],
+    ["ChatGPT", 1],
+  ]);
+  assert.deepEqual(active[0].latest.map((s) => s.id), ["o1", "o2"]);
+  assert.deepEqual(quiet.map((c) => [c.id, c.mentionCount]), [["apple", 1]]);
+});
+
 test("the evidence timeline orders stages, counts days and names missing ones", () => {
   const launch = story("x", {
     action: "release",
@@ -320,4 +420,79 @@ test("repository rows say stars, the period's gain or the creation day", () => {
   assert.equal(repoMeta(repo, "github-trending-weekly"), "Python · ★ 12,345 · +1,034 本周");
   const created = repoMeta({ ...repo, language: "", gained: null, created_at: "2026-11-01T12:00:00Z" }, "github-new");
   assert.match(created, /^★ 12,345 · 创建于 11月\d+日$/);
+});
+
+test("the evidence chart puts sources on lanes and reports on days up to now", () => {
+  setDisplayZone("UTC");
+  const event = story("lanes", {
+    timeline: [
+      entry("media", { source: "Wire", published_at: "2026-11-20T06:00:00Z" }),
+      entry("official", { source: "Lab", published_at: "2026-11-21T12:00:00Z" }),
+      entry("media", { source: "Wire", published_at: "2026-11-22T00:00:00Z", evidence: "opinion" }),
+      entry("media", { source: "Blog", published_at: null, captured_at: "" }),
+    ],
+  });
+  const chart = evidenceLanes(event, new Date("2026-11-24T00:00:00Z"));
+  assert.deepEqual(chart.lanes, ["Wire", "Lab"]);
+  assert.equal(chart.undated, 1);
+  assert.deepEqual(chart.points.map((p) => [p.lane, p.mark]), [[0, "coverage"], [1, "statement"], [0, "opinion"]]);
+  // Four days from Nov 20 00:00 to Nov 24 00:00: the official report sits at 1.5 / 4.
+  assert.equal(chart.official, 1.5 / 4);
+  assert.equal(chart.now, 1);
+  assert.deepEqual(chart.days.map((d) => d.label), ["11月20日", "11月21日", "11月22日", "11月23日"]);
+  // One report this morning: the chart ends at now (no empty future days) and starts two days back.
+  const fresh = evidenceLanes(
+    story("fresh", { timeline: [entry("media", { source: "Wire", published_at: "2026-11-25T09:00:00Z" })] }),
+    new Date("2026-11-25T13:00:00Z"),
+  );
+  assert.equal(fresh.now, 1);
+  assert.deepEqual(fresh.days.map((d) => d.label), ["11月23日", "11月24日", "11月25日"]);
+  assert.equal(fresh.points[0].x, (2 * 24 + 9) / (2 * 24 + 13));
+  const crowded = story("many", {
+    timeline: Array.from({ length: 10 }, (_, i) =>
+      entry("media", { source: "S" + i, published_at: `2026-11-2${i % 4}T00:00:00Z` })),
+  });
+  const many = evidenceLanes(crowded, new Date("2026-11-24T00:00:00Z"));
+  assert.equal(many.lanes.length, 8);
+  assert.equal(many.lanes[7], "其他来源");
+  assert.ok(many.points.every((p) => p.lane < 8));
+  assert.deepEqual(evidenceLanes(story("none")).lanes, []);
+  setDisplayZone(undefined);
+});
+
+test("quick reading deals unread briefing stories once, in briefing order", () => {
+  const a = story("a"), b = story("b", { known: true }), c = story("c", { dismissed: true }), d = story("d");
+  assert.deepEqual(deckStories([a, b, c, d, a]).map((s) => s.id), ["a", "d"]);
+});
+
+test("the sidebar shows the reader's companies in their order, or the four most active", () => {
+  const card = (id: string, total: number) =>
+    ({ id, name: id, total, productSummary: "", products: [], officialCount: 0, majorCount: 0,
+       freshCount: 0, mentionCount: 0, latest: [] });
+  const cards = {
+    active: [card("openai", 9), card("google", 7), card("anthropic", 5), card("nvidia", 3), card("meta", 1)],
+    quiet: [card("apple", 0)],
+  };
+  assert.deepEqual(drawerCompanies(cards).map((c) => c.id), ["openai", "google", "anthropic", "nvidia"]);
+  assert.deepEqual(drawerCompanies(cards, ["apple", "gone", "nvidia"]).map((c) => c.id), ["apple", "nvidia"]);
+  assert.deepEqual(drawerCompanies(cards, []), []);
+});
+
+test("更多进展 ranks by importance: corrections first, then score, newest among equals", () => {
+  const events = [
+    story("old-high", { score: 20, published_at: "2026-11-01T00:00:00Z" }),
+    story("new-low", { score: 8, published_at: "2026-11-03T00:00:00Z" }),
+    story("new-high", { score: 20, published_at: "2026-11-02T00:00:00Z" }),
+    story("fix", { score: 5, protected: true, published_at: "2026-10-30T00:00:00Z" }),
+  ];
+  const more = sections(view(events), "", "", "").more.map((e) => e.id);
+  assert.deepEqual(more, ["fix", "new-high", "old-high", "new-low"]);
+});
+
+test("the theme follows the reader's choice, or the system when they chose 跟随系统", async () => {
+  const { resolveTheme } = await import("../src/theme.ts");
+  assert.equal(resolveTheme("light", true), "light");
+  assert.equal(resolveTheme("dark", false), "dark");
+  assert.equal(resolveTheme("auto", true), "dark");
+  assert.equal(resolveTheme("auto", false), "light");
 });
