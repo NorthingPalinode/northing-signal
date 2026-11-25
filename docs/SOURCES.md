@@ -33,6 +33,7 @@
 - [GitHub Trending](https://github.com/trending) 没有官方接口，解析公开网页（`github_trending`）；GitHub 改版会使解析失效，届时在来源状态中显示为空或失败。
 - 近 30 天新建与 star 总量用[官方搜索接口](https://docs.github.com/en/rest/search/search#search-repositories)（`github_search`）。接口不接受主题之间的 OR，按每个主题分别查询再按 star 合并去重。匿名额度较低，可配置 `READER_GITHUB_TOKEN`。实测中曾有一次 `api.github.com` 被本机网络解析到非公网地址而被公网读取边界拒绝，重试即恢复。
 - 榜单存放在该来源的状态中（`source_states`），不新增数据表、不生成材料、不调用模型；失败时保留上一次的榜单与时间。
+- 2026-11-25 更新：按所有者要求移除 `llama.cpp · 开源发布`（`llamacpp-release`），固定来源入口现为 64 个。
 
 ## 按重要性排列的未完成项
 
@@ -67,7 +68,6 @@ X 接入依据：[近期检索](https://docs.x.com/x-api/posts/search/quickstart
 | 核心 | [xAI · 官网发布](https://x.ai/news) | 官网列表 → 原文补读 | 3 / 1 |
 | 核心 | [Mistral · 官网发布](https://mistral.ai/news/) | 官网列表 → 原文补读 | 3 / 1 |
 | 核心 | [SGLang · 开源发布](https://github.com/sgl-project/sglang/releases) | GitHub Releases | 3 / 3 |
-| 核心 | [llama.cpp · 开源发布](https://github.com/ggml-org/llama.cpp/releases) | GitHub Releases | 3 / 3 |
 | 核心 | [Ollama · 开源发布](https://github.com/ollama/ollama/releases) | GitHub Releases | 3 / 3 |
 | 核心 | [Transformers · 开源发布](https://github.com/huggingface/transformers/releases) | GitHub Releases | 3 / 3 |
 | 核心 | [LangGraph · 开源发布](https://github.com/langchain-ai/langgraph/releases) | GitHub Releases | 3 / 3 |
