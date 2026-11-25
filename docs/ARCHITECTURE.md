@@ -72,4 +72,4 @@ flowchart LR
 
 ## 历史
 
-2026-10 的 0.2 目标工作台和 G1–G4 研究、评测、审计材料已于 2026-11-10 从主分支移除，保存在 `archive/research-g1-g4` 分支和 `archive/g1-g4-final` 标签。旧个人数据库可用 `scripts/export_legacy.py` 只读导出。最初从比赛项目迁入的资产及其字节校验记录见 [MIGRATION.md](MIGRATION.md) 和 `docs/provenance/`。
+2026-10 的 0.2 目标工作台和 G1–G4 研究、评测、审计材料已于 2026-11-10 从主分支移除，仍保留在主分支历史的提交 `287e2c6` 中（`b236b76` 移除前的最后状态）。旧个人数据库可用 `scripts/export_legacy.py` 只读导出。最初从比赛项目迁入的资产及其字节校验记录见 [MIGRATION.md](MIGRATION.md) 和 `docs/provenance/`。

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './ReaderApp'
 import SignIn from './SignIn'
 import { auth, onSignedOut, type Session } from './auth'
+import './tokens.css'
 import './reader.css'
 
 /** Shows the reader to a signed-in account, and the sign-in page otherwise. */

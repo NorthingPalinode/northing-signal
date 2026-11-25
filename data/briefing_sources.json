@@ -179,20 +179,6 @@
       "original_url": "https://github.com/sgl-project/sglang/releases"
     },
     {
-      "id": "llamacpp-release",
-      "name": "llama.cpp · 开源发布",
-      "role": "official",
-      "url": "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=6",
-      "hosts": [
-        "api.github.com"
-      ],
-      "kind": "releases",
-      "priority": 0,
-      "max_items": 6,
-      "description": "公开 Release 说明；不代表覆盖全部提交、标签或更新日志。",
-      "original_url": "https://github.com/ggml-org/llama.cpp/releases"
-    },
-    {
       "id": "ollama-release",
       "name": "Ollama · 开源发布",
       "role": "official",

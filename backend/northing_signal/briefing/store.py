@@ -621,6 +621,20 @@ class Store:
             rows = db.execute("SELECT data FROM receipts WHERE created_at >= ?", (since or now()[:10],)).fetchall()
         return [json.loads(r["data"]) for r in rows]
 
+    def briefed_versions(self, since, before, user=LOCAL_USER):
+        """Lead versions of the events earlier briefings put in focus or radar (snapshots created
+        in [since, before)). Versions, not event ids: the caller maps them to today's events."""
+        with self.connection() as db:
+            rows = db.execute("""
+                SELECT DISTINCT json_extract(e.value, '$.version')
+                FROM snapshots s, json_each(s.data, '$.events') e
+                WHERE s.user_id = ? AND s.created_at >= ? AND s.created_at < ?
+                  AND json_extract(e.value, '$.id') IN (
+                    SELECT value FROM json_each(s.data, '$.focus')
+                    UNION SELECT value FROM json_each(s.data, '$.radar'))""",
+                              (user, since, before)).fetchall()
+        return {r[0] for r in rows if r[0]}
+
     def snapshot(self, value, user=LOCAL_USER):
         key = digest([now(), user, value])[:24]
         cutoff = (datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_DAYS)).isoformat()

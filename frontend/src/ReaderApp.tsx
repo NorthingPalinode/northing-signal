@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { searchSources, sourceName, type SearchSource } from "./searchSources";
 import FollowIntentForm, { intervalLabel } from "./FollowIntentForm";
 import StoryReader, { DetailActions, FeedbackChoices } from "./StoryDetail";
+import CompanyLogo, { companyAccent } from "./CompanyLogo";
+import QuickDeck from "./QuickDeck";
+import DrawerCompanies from "./DrawerCompanies";
+import { useTheme, type ThemeChoice } from "./theme";
 import { Glyph, Sheet, Toast } from "./ui";
 import { accountLabel, auth, failureMessage, quotaLabel, reach, signedOut } from "./auth";
 import brandMark from "./assets/brand.svg?no-inline";
@@ -20,9 +32,12 @@ import {
   setDisplayZone,
   siteZoneLabel,
   sinceVisit,
+  companyCards,
   companyLine,
   companyMentions,
-  dayLabel,
+  lineDays,
+  deckStories,
+  drawerCompanies,
   isMajor,
   lensLabel,
   lensStories,
@@ -30,6 +45,7 @@ import {
   rankingLabel,
   repoFlagLabel,
   repoMeta,
+  shortProductName,
   trendFromHash,
   trendHash,
   type Lens,
@@ -199,6 +215,14 @@ function StoryRow({
           {story.protected && (
             <span className="r-badge warn">重要{actionLabel[story.action]}</span>
           )}
+          {story.carried && !story.known && (
+            <span
+              className="r-badge"
+              title="之前的简报里已经出现过，之后没有官方新动作或更多来源报道，所以不再占重点位置"
+            >
+              之前出现过
+            </span>
+          )}
           {story.heat_trend === "rising" && (
             <span className="r-badge accent" title="最近 6 小时有新的来源开始报道">
               热度上升
@@ -265,7 +289,7 @@ function TopicFilter({
   counts?: Partial<Record<Topic, number>>;
 }) {
   return (
-    <div className="r-chips r-narrow-only" role="toolbar" aria-label="按方向筛选">
+    <div className="r-chips" role="toolbar" aria-label="按方向筛选">
       <button
         className={!topic ? "active" : ""}
         aria-pressed={!topic}
@@ -288,56 +312,6 @@ function TopicFilter({
         ),
       )}
     </div>
-  );
-}
-
-/** Wide-screen topic filter: every direction with its share of stories. */
-function TopicCard({
-  topic,
-  setTopic,
-  counts,
-  title = "按方向",
-}: {
-  topic: string;
-  setTopic: (t: string) => void;
-  counts: Partial<Record<Topic, number>>;
-  title?: string;
-}) {
-  const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
-  const max = Math.max(1, ...Object.values(counts).map((n) => n || 0));
-  return (
-    <section className="r-card">
-      <h2 className="r-card-title">{title}</h2>
-      <div className="r-topic-list" role="toolbar" aria-label="按方向筛选">
-        <button
-          className={!topic ? "active" : ""}
-          aria-pressed={!topic}
-          onClick={() => setTopic("")}
-        >
-          <span>全部</span>
-          <small>{total}</small>
-        </button>
-        {(Object.entries(topics) as [Topic, string][]).map(([id, label]) => (
-          <button
-            key={id}
-            className={topic === id ? "active" : ""}
-            aria-pressed={topic === id}
-            disabled={!counts[id] && topic !== id}
-            onClick={() => setTopic(topic === id ? "" : id)}
-          >
-            <span>
-              <i className={"r-dot t-" + id} />
-              {label}
-            </span>
-            <small>{counts[id] || 0}</small>
-            <em
-              className={"t-" + id}
-              style={{ width: `${((counts[id] || 0) / max) * 100}%` }}
-            />
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -409,9 +383,11 @@ export default function ReaderApp() {
     storyFromHash(window.location.hash),
   );
   /** Where the open story came from: its list (for prev/next) and page (for back). */
-  const [origin, setOrigin] = useState<{ page: Page; ids: string[] } | null>(
-    null,
-  );
+  const [origin, setOrigin] = useState<{
+    page: Page;
+    ids: string[];
+    label?: string;
+  } | null>(null);
   const [feedback, setFeedback] = useState<Story | null>(null);
   const [settings, setSettings] = useState(false);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -442,9 +418,25 @@ export default function ReaderApp() {
     data: WeeklyReport | null;
   } | null>(null);
   const [historical, setHistorical] = useState<string | null>(null);
+  /** The left drawer can be hidden (it then peeks from the left edge); remembered per browser. */
+  const [drawerHidden, setDrawerHidden] = useState(() => {
+    try {
+      return localStorage.getItem("ns-drawer") === "hidden";
+    } catch {
+      return false;
+    }
+  });
+  const [peek, setPeek] = useState(false);
+  const [deck, setDeck] = useState<Story[] | null>(null);
+  const [editCompanies, setEditCompanies] = useState(false);
+  const [theme, setTheme] = useTheme();
+  const navRef = useRef<HTMLElement>(null);
+  const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
   const visited = useRef(false);
   const scrollMemo = useRef<{ page: Page; y: number } | null>(null);
   const restoreY = useRef<number | null>(null);
+  const companyGridY = useRef<number | null>(null);
+  const prevTrendCompany = useRef(trend.company);
   const opened = useRef("");
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   const say = useCallback(
@@ -490,6 +482,18 @@ export default function ReaderApp() {
     window.scrollTo(0, restoreY.current ?? 0);
     restoreY.current = null;
   }, [page, storyId]);
+  useEffect(() => {
+    if (prevTrendCompany.current === trend.company) return;
+    const leavingCompany = !!prevTrendCompany.current && !trend.company;
+    prevTrendCompany.current = trend.company;
+    if (page !== "trends") return;
+    if (leavingCompany && companyGridY.current !== null) {
+      window.scrollTo(0, companyGridY.current);
+      companyGridY.current = null;
+    } else if (trend.company) {
+      window.scrollTo(0, 0);
+    }
+  }, [page, trend.company]);
   useEffect(() => {
     const listener = (e: KeyboardEvent) => keys.current(e);
     window.addEventListener("keydown", listener);
@@ -687,8 +691,8 @@ export default function ReaderApp() {
     }
   }
   /** Open a story as its own page; `list` is what prev/next walk through. */
-  function open(story: Story, list: Story[] = [story]) {
-    setOrigin({ page, ids: list.map((s) => s.id) });
+  function open(story: Story, list: Story[] = [story], label?: string) {
+    setOrigin({ page, ids: list.map((s) => s.id), label });
     scrollMemo.current = { page, y: window.scrollY };
     window.location.hash = "story/" + encodeURIComponent(story.id);
   }
@@ -699,6 +703,10 @@ export default function ReaderApp() {
     setTrend(value);
     setShowAllMore(false);
     window.location.hash = trendHash(value);
+  }
+  function openCompanyRoadmap(companyId: string) {
+    companyGridY.current = window.scrollY;
+    goTrend({ lens: "company", company: companyId, product: "" });
   }
   function goStory(id: string) {
     window.location.replace("#story/" + encodeURIComponent(id));
@@ -786,10 +794,29 @@ export default function ReaderApp() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     say(`已下载 ${data.filename}`);
   }
+  function toggleDrawer() {
+    // Narrow screens: the drawer is an overlay opened from the window bar.
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setMenuOpen((open) => !open);
+      return;
+    }
+    setPeek(false);
+    setDrawerHidden((hidden) => {
+      try {
+        localStorage.setItem("ns-drawer", hidden ? "shown" : "hidden");
+      } catch {
+        /* private mode: keep it for this visit only */
+      }
+      return !hidden;
+    });
+  }
   function navigate(next: Page) {
     setMenuOpen(false);
+    setPeek(false);
     scrollMemo.current = null;
+    companyGridY.current = null;
     setPage(next);
+    if (next === "trends") setTrend({ lens: "company", company: "", product: "" });
     window.location.hash = next;
     setTopic("");
     if (next !== "discover") setQuery("");
@@ -870,15 +897,25 @@ export default function ReaderApp() {
     saved,
     followingEvents,
     archive,
-    okSources,
   } = sections(view, topic, query, selectedFollow);
   const fixedSources =
     view?.sources.filter((s) => s.kind !== "search").length || 0;
+  // Subscribed sources only: on-demand search sources are not part of the update.
+  const okFixed =
+    view?.sources.filter((s) => s.kind !== "search" && s.state.status === "ok").length || 0;
   const unreadFollows = follows.reduce((n, f) => n + f.unread_ids.length, 0);
   const savedCount =
     view?.saved_events?.length ?? view?.events.filter((e) => e.saved).length ?? 0;
   const newCount = view?.counts.new || 0;
   const all = view?.events || [];
+  // Every company's line counts walk all events: computed once per view, not on every render.
+  const cardSet = useMemo(
+    () =>
+      view
+        ? companyCards(view.companies || [], view.events, view.previous_visit)
+        : { active: [], quiet: [] },
+    [view],
+  );
   const briefingList = [...focus, ...radar, ...more];
   const storyPool = view ? [...all, ...(view.saved_events || [])] : [];
   const byId = (id: string) => storyPool.find((e) => e.id === id);
@@ -889,6 +926,25 @@ export default function ReaderApp() {
   const position = neighbours(trail, storyId);
   const from = origin?.page || "briefing";
   const navPage = page === "story" ? from : page;
+  const pinnedCompany = navPage === "trends" && trend.lens === "company" ? trend.company : "";
+
+  // The drawer's white pill slides to the current entry; measured after layout.
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const current = nav?.querySelector<HTMLElement>("[aria-current='page']");
+    // Measured against the nav itself: the groups are positioned, so offsetTop would be
+    // relative to the entry's own group and put the pill on a row of the first group.
+    const next =
+      nav && current
+        ? {
+            top: current.getBoundingClientRect().top - nav.getBoundingClientRect().top + nav.scrollTop,
+            height: current.offsetHeight,
+          }
+        : null;
+    setPill((prev) =>
+      prev?.top === next?.top && prev?.height === next?.height ? prev : next,
+    );
+  });
 
   useEffect(() => {
     if (page !== "story") {
@@ -904,7 +960,7 @@ export default function ReaderApp() {
   }, [page, current?.id, historical, send, fail, load]);
 
   keys.current = (e) => {
-    if (page !== "story" || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     const target = e.target as HTMLElement;
     if (
       target.closest("input, textarea, select, [contenteditable]") ||
@@ -912,6 +968,22 @@ export default function ReaderApp() {
     )
       return;
     const key = e.key.toLowerCase();
+    if (key === "[") {
+      e.preventDefault();
+      toggleDrawer();
+      return;
+    }
+    if (key === "/" && page !== "discover") {
+      e.preventDefault();
+      navigate("discover");
+      return;
+    }
+    if (page === "trends" && trend.lens === "company" && trend.company && key === "escape") {
+      e.preventDefault();
+      goTrend({ company: "", product: "" });
+      return;
+    }
+    if (page !== "story") return;
     if (key === "escape") closeStory();
     else if ((key === "j" || key === "arrowright") && position.next)
       goStory(position.next);
@@ -929,9 +1001,10 @@ export default function ReaderApp() {
       reason?: string;
       unread?: boolean;
       list?: Story[];
+      originLabel?: string;
     } = {},
   ) {
-    const { list, ...rest } = extra;
+    const { list, originLabel, ...rest } = extra;
     return (
       <StoryRow
         key={story.id + story.version}
@@ -940,7 +1013,7 @@ export default function ReaderApp() {
         {...rest}
         readOnly={!!historical}
         send={historical ? noSend : send}
-        open={() => open(story, list)}
+        open={() => open(story, list, originLabel)}
         toggleSave={() => void act(story, "saved")}
         askFeedback={() => setFeedback(story)}
       />
@@ -962,51 +1035,45 @@ export default function ReaderApp() {
     </button>
   );
 
+  /** Tools in the drawer: dialogs, not pages. */
   const secondaryNav = (
     <>
-      <button
-        className={navPage === "library" ? "selected" : ""}
-        aria-current={navPage === "library" ? "page" : undefined}
-        onClick={() => navigate("library")}
-      >
-        <Glyph name="book" size={18} />
-        <span>资料库</span>
-        <small>{view?.counts.materials || ""}</small>
-      </button>
-      <button onClick={openHistory}>
-        <Glyph name="clock" size={18} />
+      <button className="r-drawer-item" onClick={openHistory}>
+        <Glyph name="clock" size={17} />
         <span>过去的简报</span>
       </button>
-      <button onClick={() => openReport("recent")}>
-        <Glyph name="doc" size={18} />
+      <button className="r-drawer-item" onClick={() => openReport("recent")}>
+        <Glyph name="doc" size={17} />
         <span>导出周报</span>
       </button>
       <button
+        className="r-drawer-item"
         onClick={() => {
           setMenuOpen(false);
           setSourcesOpen(true);
         }}
       >
-        <Glyph name="signal" size={18} />
+        <Glyph name="pulse" size={17} />
         <span>来源状态</span>
-        <small>
-          {okSources}/{fixedSources}
-        </small>
+        <b>
+          {okFixed}/{fixedSources}
+        </b>
       </button>
-      <button onClick={openPrefs}>
-        <Glyph name="settings" size={18} />
+      <button className="r-drawer-item" onClick={openPrefs}>
+        <Glyph name="settings" size={17} />
         <span>阅读偏好</span>
       </button>
       {view?.account?.auth === "token" && (
         <button
+          className="r-drawer-item"
           onClick={() => {
             setMenuOpen(false);
             setAccountOpen(true);
           }}
         >
-          <Glyph name="follow" size={18} />
+          <Glyph name="user" size={17} />
           <span>账号</span>
-          <small>{view.account.role === "admin" ? "管理员" : ""}</small>
+          {view.account.role === "admin" && <b>管理员</b>}
         </button>
       )}
     </>
@@ -1016,9 +1083,10 @@ export default function ReaderApp() {
 
   function briefingPage() {
     if (!view) return null;
-    const visibleMore = showAllMore ? more : more.slice(0, 6);
+    const visibleMore = showAllMore ? more : more.slice(0, 8);
     const nothing = !focus.length && !radar.length && !more.length;
-    const top = topThree(view);
+    const top = topic ? [] : topThree(view);
+    const rest = focus.filter((s) => !top.includes(s));
     // "Since you were last here": the briefing's real changes, the reason to come back.
     const changes = historical || topic ? null : sinceVisit(briefingList, view.previous_visit);
     const changed = changes?.map((c) => c.story) || [];
@@ -1032,69 +1100,45 @@ export default function ReaderApp() {
         )}
         {changes && changes.length > 0 && (
           <section className="r-delta" aria-label="距你上次来的变化">
-            <header>
-              <h2>距你上次来，有 {changes.length} 件事变了</h2>
-              <small>
-                上次 {clockLabel(view.previous_visit)} ·{" "}
-                {[
-                  newOnes ? `${newOnes} 件新事` : "",
-                  changes.length - newOnes ? `${changes.length - newOnes} 件有新进展` : "",
-                ]
-                  .filter(Boolean)
-                  .join("，")}{" "}
-                · 读过的不再列出
-              </small>
+            <header className="r-delta-head">
+              <strong className="r-delta-n">{changes.length}</strong>
+              <div>
+                <h2>件事在你上次来之后有变化</h2>
+                <small>
+                  上次 {clockLabel(view.previous_visit)}
+                  {newOnes ? ` · ${newOnes} 件新事` : ""}
+                  {changes.length - newOnes ? ` · ${changes.length - newOnes} 件有新进展` : ""}
+                </small>
+              </div>
             </header>
             <ul>
-              {changes.slice(0, 5).map(({ story: s, kind, label }) => (
+              {changes.slice(0, 6).map(({ story: s, kind, label }) => (
                 <li key={s.id}>
                   <button onClick={() => open(s, changed)}>
                     <span className={"r-delta-tag " + kind}>{label}</span>
-                    <span className="r-delta-body">
-                      <strong>{s.title}</strong>
-                      <small>
-                        {s.source}
-                        {s.source_count > 1 ? ` 等 ${s.source_count} 个来源` : ""}
-                        {s.standing ? ` · ${s.standing}` : ""}
-                      </small>
-                    </span>
+                    <strong>{s.title}</strong>
                   </button>
                 </li>
               ))}
             </ul>
-            {changes.length > 5 && (
-              <button className="r-link small" onClick={() => open(changed[5], changed)}>
-                还有 {changes.length - 5} 件，接着读
+            {changes.length > 6 && (
+              <button className="r-link small" onClick={() => open(changed[6], changed)}>
+                还有 {changes.length - 6} 件，接着读
               </button>
             )}
           </section>
         )}
-        {!topic && top.length > 0 && (
-          <section className="r-top3" aria-label="最重要的几件事">
-            <header>
+        {top.length > 0 && (
+          <section className="r-section" aria-label="最重要的几件事">
+            <header className="r-section-head">
               <h2>
-                {historical ? "当时" : "现在"}最重要的 {top.length} 件事
+                {historical ? "当时" : ""}最重要的 {top.length} 件事
               </h2>
               <small>按重要性、时效和你的偏好选出</small>
             </header>
-            <ol>
-              {top.map((s, i) => (
-                <li key={s.id} className={s.known ? "known" : ""}>
-                  <button onClick={() => open(s, top)}>
-                    <span className="r-top3-n" aria-hidden="true">
-                      {i + 1}
-                    </span>
-                    <span className="r-top3-body">
-                      <strong>
-                        {s.title}
-                        {s.new && !s.known && <em className="r-badge new">新</em>}
-                      </strong>
-                      <small>{s.reason || s.summary}</small>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ol>
+            <div className="r-top3">
+              {top.map((s, i) => row(s, i === 0 ? "lead" : "normal", { index: i, list: top }))}
+            </div>
           </section>
         )}
         <TopicFilter
@@ -1133,12 +1177,12 @@ export default function ReaderApp() {
           </Empty>
         ) : (
           <>
-            {focus.length > 0 && (
+            {rest.length > 0 && (
               <section className="r-section">
                 <header className="r-section-head">
-                  <h2>重点</h2>
+                  <h2>{top.length ? "其余重点" : "重点"}</h2>
                   <button
-                    className="r-link"
+                    className="r-link small"
                     onClick={openPrefs}
                     title="在「阅读偏好」中调整每次阅读时长"
                   >
@@ -1146,10 +1190,8 @@ export default function ReaderApp() {
                     {Math.max(1, Math.ceil(view.estimated_seconds / 60))} 分钟
                   </button>
                 </header>
-                <div className="r-list-stories r-grid">
-                  {focus.map((s, i) =>
-                    row(s, i === 0 ? "lead" : "normal", { list: briefingList }),
-                  )}
+                <div className="r-grid">
+                  {rest.map((s) => row(s, "normal", { list: briefingList }))}
                 </div>
               </section>
             )}
@@ -1159,10 +1201,8 @@ export default function ReaderApp() {
                   <h2>前沿速览</h2>
                   <small>值得留意的新方向</small>
                 </header>
-                <div className="r-list-stories compact">
-                  {radar.map((s, i) =>
-                    row(s, "compact", { index: i, list: briefingList }),
-                  )}
+                <div className="r-rows">
+                  {radar.map((s) => row(s, "compact", { list: briefingList }))}
                 </div>
               </section>
             )}
@@ -1172,16 +1212,11 @@ export default function ReaderApp() {
                   <h2>更多进展</h2>
                   <small>{more.length} 项 · 有依据、未放进重点 · 最新在前</small>
                 </header>
-                <div className="r-list-stories compact">
-                  {visibleMore.map((s) =>
-                    row(s, "compact", { list: briefingList }),
-                  )}
+                <div className="r-rows">
+                  {visibleMore.map((s) => row(s, "compact", { list: briefingList }))}
                 </div>
                 {more.length > visibleMore.length && (
-                  <button
-                    className="r-button block"
-                    onClick={() => setShowAllMore(true)}
-                  >
+                  <button className="r-button block" onClick={() => setShowAllMore(true)}>
                     再显示 {more.length - visibleMore.length} 项
                   </button>
                 )}
@@ -1245,7 +1280,7 @@ export default function ReaderApp() {
                   将检索 {channels.map((c) => searchSources[c]).join("、") || "—"}
                   <button
                     type="button"
-                    className="r-link small r-narrow-only"
+                    className="r-link small"
                     onClick={() => setChannelsOpen(!channelsOpen)}
                   >
                     {channelsOpen ? "收起" : "更改来源"}
@@ -1270,7 +1305,7 @@ export default function ReaderApp() {
               </div>
             </div>
             {channelsOpen && (
-              <fieldset className="r-channel-grid r-narrow-only">
+              <fieldset className="r-channel-grid">
                 <legend>检索来源</legend>
                 {(Object.entries(searchSources) as [SearchSource, string][]).map(
                   ([id, label]) => (
@@ -1374,8 +1409,8 @@ export default function ReaderApp() {
             />
           )}
           {browse.length ? (
-            <div className="r-list-stories compact">
-              {browse.map((s) => row(s, "normal", { list: browse }))}
+            <div className="r-rows">
+              {browse.map((s) => row(s, "compact", { list: browse }))}
             </div>
           ) : (
             <Empty icon="search" title={q ? "已有内容中没有匹配" : "暂时没有内容"}>
@@ -1671,7 +1706,11 @@ export default function ReaderApp() {
                     <strong>{repo.name}</strong>
                     <Glyph name="external" size={13} />
                   </a>
-                  {repo.description && <p>{repo.description}</p>}
+                  {repo.summary_zh ? (
+                    <p title={repo.description}>{repo.summary_zh}</p>
+                  ) : (
+                    repo.description && <p lang="en">{repo.description}</p>
+                  )}
                   <small>
                     {repoMeta(repo, current.id)}
                     {repo.flags.map((f) => (
@@ -1696,6 +1735,8 @@ export default function ReaderApp() {
         <p className="r-card-text">
           {current.description} 只保留 AI 相关项目。star 代表关注度，不代表质量；「热度存疑」只按 fork
           与 star 的比例标注，仅供参考。
+          {current.rows.some((r) => r.summary_zh) &&
+            " 中文简介由模型根据项目自己的英文简介改写，不含评价；悬停可看原文。"}
         </p>
       </section>
     );
@@ -1703,13 +1744,17 @@ export default function ReaderApp() {
 
   function trendSubtitle() {
     if (trend.lens !== "company") return lensNote[trend.lens];
-    return "各公司自己做了什么：实心为官方来源，空心为只有媒体报道";
+    const picked = view?.companies?.find((c) => c.id === trend.company);
+    if (picked)
+      return `${picked.name} 路线图 · 实心节点有官方来源，空心节点仅媒体报道`;
+    const { active } = cardSet;
+    const fresh = active.reduce((sum, c) => sum + c.freshCount, 0);
+    return `${active.length} 家公司有近期动作${fresh ? ` · 自你上次来新增 ${fresh} 个` : ""} · 只计各公司自己的动作`;
   }
 
   function trendsPage() {
     if (!view) return null;
     const catalog = view.companies || [];
-    const counts = lineCounts(all);
     const tabs = (
       <div className="r-tabs" role="tablist" aria-label="板块">
         {(Object.keys(lensLabel) as Lens[]).map((id) => (
@@ -1758,117 +1803,216 @@ export default function ReaderApp() {
         </>
       );
     }
-    const ranked = catalog
-      .filter((c) => counts.companies[c.id])
-      .sort((a, b) => counts.companies[b.id] - counts.companies[a.id]);
-    const company = catalog.find((c) => c.id === trend.company) || ranked[0];
-    if (!company)
+
+    const company = trend.company ? catalog.find((c) => c.id === trend.company) : undefined;
+    if (!company) {
+      const { active, quiet } = cardSet;
+      if (!active.length && quiet.every((c) => !c.mentionCount))
+        return (
+          <>
+            {tabs}
+            <Empty icon="compass" title="还没有能归到公司的进展">
+              <p>公司与产品的对应关系在 data/companies.json 中，可以直接编辑。</p>
+            </Empty>
+          </>
+        );
       return (
         <>
           {tabs}
-          <Empty icon="compass" title="还没有能归到公司的进展">
-            <p>公司与产品的对应关系在 data/companies.json 中，可以直接编辑。</p>
-          </Empty>
+          {active.length > 0 && (
+            <div className="r-co-grid">
+              {active.map((c) => (
+                <button
+                  key={c.id}
+                  className="r-co-card"
+                  style={{ "--brand": companyAccent(c.id) } as CSSProperties}
+                  onClick={() => openCompanyRoadmap(c.id)}
+                  aria-label={`${c.name}：${c.total} 个动作${c.freshCount ? `，自上次来新增 ${c.freshCount} 个` : ""}`}
+                >
+                  <CompanyLogo id={c.id} name={c.name} size={30} className="xl" />
+                  <span className="r-co-count">
+                    <strong>{c.total}</strong>
+                    <small>个动作</small>
+                  </span>
+                  <h3>{c.name}</h3>
+                  <em className="r-co-fresh">{c.freshCount > 0 ? `+${c.freshCount} 新` : ""}</em>
+                </button>
+              ))}
+            </div>
+          )}
+          {quiet.length > 0 && (
+            <section className="r-section">
+              <header className="r-section-head">
+                <h2>近期暂无本身动作</h2>
+                <small>点击查看提到它们的报道</small>
+              </header>
+              <div className="r-co-quiet">
+                {quiet.map((c) => (
+                  <button
+                    key={c.id}
+                    className="r-co-tile"
+                    style={{ "--brand": companyAccent(c.id) } as CSSProperties}
+                    onClick={() => openCompanyRoadmap(c.id)}
+                  >
+                    <CompanyLogo id={c.id} name={c.name} size={18} className="sm" />
+                    <span>{c.name}</span>
+                    {c.mentionCount > 0 && <small>{c.mentionCount}</small>}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
         </>
       );
+    }
+
     const { products } = lineCounts(all, company.id);
-    const line = companyLine(all, company.id, trend.product);
+    const allLine = companyLine(all, company.id);
+    const line = trend.product ? companyLine(all, company.id, trend.product) : allLine;
     const shown = showAllMore ? line : line.slice(0, 40);
     const mentions = companyMentions(all, company.id);
-    const fresh = new Set((sinceVisit(line, view.previous_visit) || []).map((c) => c.story.id));
-    const days: [string, Story[]][] = [];
-    for (const s of shown) {
-      const day = dayLabel(s.published_at, s.captured_at);
-      const last = days[days.length - 1];
-      if (last && last[0] === day) last[1].push(s);
-      else days.push([day, [s]]);
-    }
+    const freshAll = new Set(
+      (sinceVisit(allLine, view.previous_visit) || []).map((c) => c.story.id),
+    );
+    const officialTotal = allLine.filter(
+      (s) => s.companies?.find((c) => c.id === company.id)?.official,
+    ).length;
+    const majorTotal = allLine.filter(isMajor).length;
+    const brandStyle = { "--brand": companyAccent(company.id) } as CSSProperties;
+    const originLabel = `${company.name} 路线图`;
+    const days = lineDays(shown);
     return (
       <>
         {tabs}
-        <div className="r-chips wrap" aria-label="公司">
-          {ranked.map((c) => {
-            const news = (sinceVisit(companyLine(all, c.id), view.previous_visit) || []).length;
-            return (
+        <section className="r-line" style={brandStyle}>
+          <header className="r-roadmap-head">
+            <div className="r-roadmap-bar">
               <button
-                key={c.id}
-                className={c.id === company.id ? "active" : ""}
-                aria-pressed={c.id === company.id}
-                onClick={() => goTrend({ company: c.id, product: "" })}
+                className="r-roadmap-back"
+                onClick={() => goTrend({ company: "", product: "" })}
               >
-                {c.name}
-                <small>{counts.companies[c.id]}</small>
-                {news > 0 && <b title="自你上次来的新动作">{news}</b>}
+                <Glyph name="back" size={16} />
+                <span>所有公司</span>
               </button>
-            );
-          })}
-        </div>
-        <section className="r-line">
-          <header className="r-section-head">
-            <h2>{company.name}</h2>
-            <small>
-              {line.length} 个动作
-              {fresh.size ? ` · 自你上次来 ${fresh.size} 个` : ""}
-            </small>
-          </header>
-          <div className="r-chips wrap" aria-label="产品">
-            <button
-              className={!trend.product ? "active" : ""}
-              aria-pressed={!trend.product}
-              onClick={() => goTrend({ product: "" })}
-            >
-              全部
-            </button>
-            {company.products
-              .filter((p) => products[p.id])
-              .map((p) => (
+              <div className="r-roadmap-legend" aria-label="节点图例">
+                <span>
+                  <i />
+                  官方来源
+                </span>
+                <span>
+                  <i className="reported" />
+                  仅媒体报道
+                </span>
+                <span>
+                  <i className="major" />
+                  发布与重要变更
+                </span>
+              </div>
+            </div>
+            <div className="r-roadmap-identity">
+              <CompanyLogo id={company.id} name={company.name} size={31} className="lg" />
+              <div className="r-roadmap-info">
+                <h2>{company.name}</h2>
+                <div className="r-roadmap-kpis">
+                  <span>
+                    共 <strong>{allLine.length}</strong> 个动作
+                  </span>
+                  <span>
+                    官方来源 <strong>{officialTotal}</strong> 个
+                  </span>
+                  {majorTotal > 0 && (
+                    <span>
+                      发布/重要变更 <strong>{majorTotal}</strong> 次
+                    </span>
+                  )}
+                  {freshAll.size > 0 && (
+                    <span className="fresh">
+                      自上次来新增 {freshAll.size} 个
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            {company.products.some((p) => products[p.id]) && (
+              <div className="r-roadmap-tracks" aria-label="产品线">
                 <button
-                  key={p.id}
-                  className={trend.product === p.id ? "active" : ""}
-                  aria-pressed={trend.product === p.id}
-                  onClick={() => goTrend({ product: p.id })}
+                  className={!trend.product ? "active" : ""}
+                  aria-pressed={!trend.product}
+                  onClick={() => goTrend({ product: "" })}
                 >
-                  {p.name}
-                  <small>{products[p.id]}</small>
+                  全部
+                  <small>{allLine.length}</small>
                 </button>
-              ))}
-          </div>
+                {company.products
+                  .filter((p) => products[p.id])
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      className={trend.product === p.id ? "active" : ""}
+                      aria-pressed={trend.product === p.id}
+                      onClick={() => goTrend({ product: p.id })}
+                    >
+                      {p.name}
+                      <small>{products[p.id]}</small>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </header>
           {days.length ? (
-            <ol className="r-line-days">
-              {days.map(([day, stories]) => (
-                <li key={day}>
-                  <h3>{day}</h3>
-                  <ul>
+            <ol className="r-roadmap">
+              {days.map(({ day, stories }) => (
+                <li key={day} className={"r-roadmap-day" + (day === "发布日期未知" ? " undated" : "")}>
+                  <div className="r-roadmap-date">
+                    <span>{day}</span>
+                  </div>
+                  <ul className="r-roadmap-nodes">
                     {stories.map((s) => {
                       const own = s.companies?.find((c) => c.id === company.id);
                       const major = isMajor(s);
+                      const prodBadges = (own?.products || [])
+                        .map((pid) => company.products.find((p) => p.id === pid)?.name)
+                        .filter((n): n is string => !!n)
+                        .map(shortProductName);
                       return (
                         <li
                           key={s.id}
                           className={
-                            "r-node" +
-                            (major ? " major" : "") +
+                            "r-rm-node" +
+                            (major ? " major" : " minor") +
                             (own?.official ? " official" : " reported") +
                             (s.known ? " known" : "")
                           }
                         >
-                          <button onClick={() => open(s, shown)}>
-                            <span className="r-node-dot" aria-hidden="true" />
-                            <span className="r-node-body">
-                              <strong>
-                                {s.title}
-                                {fresh.has(s.id) && <em className="r-badge new">新</em>}
-                              </strong>
-                              <small>
-                                {[
-                                  actionLabel[s.action],
-                                  own?.official ? "" : "媒体报道，未见官方",
-                                  major ? s.standing : s.source,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
+                          <button onClick={() => open(s, shown, originLabel)}>
+                            <span className="r-rm-dot" aria-hidden="true" />
+                            <div className="r-rm-card">
+                              <div className="r-rm-meta">
+                                <span className={"r-rm-action a-" + s.action}>
+                                  {actionLabel[s.action] || "进展"}
+                                </span>
+                                {prodBadges.map((label) => (
+                                  <span key={label} className="r-rm-product">
+                                    {label}
+                                  </span>
+                                ))}
+                                <span
+                                  className={
+                                    "r-rm-source" + (own?.official ? "" : " reported")
+                                  }
+                                >
+                                  {own?.official ? "官方来源" : "媒体报道，未见官方"}
+                                </span>
+                                {freshAll.has(s.id) && <em className="r-badge new">新</em>}
+                              </div>
+                              <strong className="r-rm-title">{s.title}</strong>
+                              {major && s.summary && (
+                                <p className="r-rm-summary">{s.summary}</p>
+                              )}
+                              <small className="r-rm-standing">
+                                {major ? s.standing || s.source : s.source}
                               </small>
-                            </span>
+                            </div>
                           </button>
                         </li>
                       );
@@ -1878,7 +2022,20 @@ export default function ReaderApp() {
               ))}
             </ol>
           ) : (
-            <p className="r-muted">这个产品暂时没有动作。</p>
+            <Empty
+              icon="compass"
+              title={
+                trend.product
+                  ? "这个产品线暂时没有动作"
+                  : `${company.name} 近期暂无本身动作`
+              }
+            >
+              <p>
+                {mentions.length > 0
+                  ? "下方展开栏可查看提到这家公司的客户、评测或外部报道。"
+                  : "更新后，属于这家公司自己的发布与进展会按时间排在这里。"}
+              </p>
+            </Empty>
           )}
           {line.length > shown.length && (
             <button className="r-button block" onClick={() => setShowAllMore(true)}>
@@ -1887,12 +2044,14 @@ export default function ReaderApp() {
           )}
         </section>
         {mentions.length > 0 && (
-          <details className="r-fold">
+          <details className="r-fold" open={!allLine.length}>
             <summary>
               关于 {company.name} 的其他报道（{mentions.length}）：客户、诉讼、他方测试等，不算它自己的动作
             </summary>
             <div className="r-list-stories">
-              {mentions.slice(0, 30).map((s) => row(s, "compact", { list: mentions }))}
+              {mentions
+                .slice(0, 30)
+                .map((s) => row(s, "compact", { list: mentions, originLabel }))}
             </div>
           </details>
         )}
@@ -1949,8 +2108,29 @@ export default function ReaderApp() {
           )),
     );
     const count = (f: (r: Archive) => boolean) => archive.filter(f).length;
+    const badSources = view.sources.filter(
+      (s) => s.kind !== "search" && s.state.status === "error",
+    ).length;
     return (
       <>
+        <div className="r-stats r-library-stats">
+          <div>
+            <strong>{view.counts.materials.toLocaleString()}</strong>
+            <small>原始材料</small>
+          </div>
+          <div>
+            <strong>{view.counts.pending}</strong>
+            <small>待整理</small>
+          </div>
+          <div>
+            <strong>{okFixed}</strong>
+            <small>来源正常</small>
+          </div>
+          <button className={badSources ? "bad" : ""} onClick={() => setSourcesOpen(true)}>
+            <strong>{badSources}</strong>
+            <small>来源暂不可用 · 查看</small>
+          </button>
+        </div>
         <div className="r-library-tools">
           <label className="r-inline-search">
             <Glyph name="search" size={16} />
@@ -2069,212 +2249,12 @@ export default function ReaderApp() {
   const followStory = (story: Story) =>
     beginFollow(story.object || story.title, story.object || "");
 
-  /* ---------- right rail (wide screens) ---------- */
-
-  const briefingCounts = topicCounts(all.filter((e) => e.qualified && !e.dismissed));
-
-  const followCard = (
-    <section className="r-card">
-      <header className="r-card-head">
-        <h2 className="r-card-title">追踪</h2>
-        <button className="r-link small" onClick={() => beginFollow()}>
-          <Glyph name="plus" size={14} /> 新增
-        </button>
-      </header>
-      {follows.length ? (
-        <div className="r-rail-list">
-          {follows.slice(0, 6).map((f) => (
-            <button
-              key={f.id}
-              onClick={() => {
-                setSelectedFollow(f.id);
-                navigate("following");
-              }}
-            >
-              <span>
-                <strong>{f.name}</strong>
-                <small>
-                  {!f.active
-                    ? "已暂停"
-                    : f.last_checked
-                      ? `检查于 ${when(f.last_checked)}`
-                      : "尚未检查"}
-                </small>
-              </span>
-              {f.unread_ids.length > 0 && (
-                <b aria-label={f.unread_ids.length + " 条新进展"}>
-                  {f.unread_ids.length}
-                </b>
-              )}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="r-card-text">
-          用一句话描述想了解的事，确认方案后会定期帮你检查。
-        </p>
-      )}
-    </section>
-  );
-
-  const recentSaved = saved.slice(0, 4);
-  const savedCard = (
-    <section className="r-card">
-      <header className="r-card-head">
-        <h2 className="r-card-title">最近收藏</h2>
-        {savedCount > 0 && (
-          <button className="r-link small" onClick={() => navigate("saved")}>
-            全部 {savedCount}
-          </button>
-        )}
-      </header>
-      {recentSaved.length ? (
-        <div className="r-rail-list">
-          {recentSaved.map((s) => (
-            <button key={s.id} onClick={() => open(s, recentSaved)}>
-              <span>
-                <strong className="r-clamp">{s.title}</strong>
-                <small>
-                  {s.source} · {when(s.published_at, s.captured_at)}
-                </small>
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="r-card-text">点卡片上的书签收藏，方便之后重读。</p>
-      )}
-    </section>
-  );
-
-  function rail() {
-    if (!view) return null;
-    if (page === "briefing")
-      return (
-        <>
-          <section className="r-card">
-            <h2 className="r-card-title">{historical ? "过去的简报" : todayLabel()}</h2>
-            <div className="r-kpis">
-              <div>
-                <strong>{view.counts.eligible}</strong>
-                <small>项进展</small>
-              </div>
-              <div>
-                <strong>{historical ? "–" : newCount}</strong>
-                <small>本次更新新增</small>
-              </div>
-              <div>
-                <strong>{Math.max(1, Math.ceil(view.estimated_seconds / 60))}</strong>
-                <small>分钟读完重点</small>
-              </div>
-            </div>
-            <div className="r-card-foot">
-              <span>{historical ? "内容保持当时版本" : updateLine(view)}</span>
-              <button className="r-link small" onClick={() => setSourcesOpen(true)}>
-                来源 {okSources}/{fixedSources} 正常
-              </button>
-            </div>
-          </section>
-          <TopicCard topic={topic} setTopic={setTopic} counts={briefingCounts} />
-          {followCard}
-          {savedCard}
-        </>
-      );
-    if (page === "discover")
-      return (
-        <>
-          {!query.trim() && (
-            <TopicCard topic={topic} setTopic={setTopic} counts={briefingCounts} />
-          )}
-          <section className="r-card">
-            <h2 className="r-card-title">外部检索来源</h2>
-            <div className="r-check-list">
-              {(Object.entries(searchSources) as [SearchSource, string][]).map(
-                ([id, label]) => (
-                  <label key={id}>
-                    <input
-                      type="checkbox"
-                      checked={channels.includes(id)}
-                      onChange={(e) =>
-                        setChannels(
-                          e.target.checked
-                            ? [...channels, id]
-                            : channels.filter((key) => key !== id),
-                        )
-                      }
-                    />
-                    {label}
-                  </label>
-                ),
-              )}
-            </div>
-            <p className="r-card-text">
-              关键词只发给勾选的来源。搜索摘要先作为线索，取得原文后再整理。
-            </p>
-          </section>
-          {followCard}
-        </>
-      );
-    if (page === "saved") {
-      const allSaved = view.saved_events || all.filter((e) => e.saved);
-      return (
-        <>
-          {allSaved.length > 0 && (
-            <TopicCard
-              topic={topic}
-              setTopic={setTopic}
-              counts={topicCounts(allSaved)}
-              title="收藏的方向"
-            />
-          )}
-          {followCard}
-        </>
-      );
-    }
-    if (page === "library") {
-      const fixed = view.sources.filter((s) => s.kind !== "search");
-      const bad = fixed.filter((s) => s.state.status === "error").length;
-      return (
-        <>
-          <section className="r-card">
-            <h2 className="r-card-title">资料来源</h2>
-            <div className="r-kpis">
-              <div>
-                <strong>{okSources}</strong>
-                <small>正常</small>
-              </div>
-              <div>
-                <strong>{bad}</strong>
-                <small>暂不可用</small>
-              </div>
-              <div>
-                <strong>{view.counts.pending}</strong>
-                <small>待整理</small>
-              </div>
-            </div>
-            <button className="r-button block" onClick={() => setSourcesOpen(true)}>
-              查看来源状态
-            </button>
-          </section>
-          <section className="r-card">
-            <h2 className="r-card-title">资料库里有什么</h2>
-            <p className="r-card-text">
-              这里保存每次收取的原始材料，包括尚未整理、判断为与 AI
-              无关或整理失败的条目。简报只展示整理后有依据的进展。
-            </p>
-          </section>
-        </>
-      );
-    }
-    return null;
-  }
-
   /* ---------- shell ---------- */
 
   const subtitle =
     page === "briefing"
       ? [
-          // The date sits in the rail card on wide screens; phones need the update times more.
+          historical ? "" : todayLabel(),
           view ? `${view.counts.eligible} 项进展` : "",
           !historical && newCount ? `新增 ${newCount} 项` : "",
           !historical ? updateLine(view) : todayLabel(),
@@ -2291,11 +2271,33 @@ export default function ReaderApp() {
             ? `${view?.counts.materials || 0} 条原始材料，含尚未整理的线索`
             : "先在已有内容中查找，没有再去外部来源";
 
-  const railContent = rail();
+  const pinned = drawerCompanies(cardSet, view?.preferences.drawer_companies);
+  // A company outside the drawer's four keeps 动向 highlighted instead of nothing.
+  const pinnedInDrawer = pinned.some((c) => c.id === pinnedCompany);
+  // A short pass, not the whole archive: the top three first, then the briefing in order.
+  const deckList = view && !historical ? deckStories([...topThree(view), ...briefingList]).slice(0, 30) : [];
+  const drawerOpen = !drawerHidden || peek;
 
-  return (
-    <div className="r-app">
-      <aside className="r-nav">
+  const navButton = (id: Page, icon: string, label: string, extra?: React.ReactNode) => (
+    <button
+      key={id}
+      className="r-drawer-item"
+      aria-current={navPage === id && !pinnedInDrawer ? "page" : undefined}
+      onClick={() => navigate(id)}
+    >
+      <Glyph name={icon} size={18} />
+      <span>{label}</span>
+      {extra}
+    </button>
+  );
+
+  const drawer = (
+    <aside
+      className={"r-drawer" + (menuOpen ? " open" : "")}
+      aria-label="导航"
+      onMouseLeave={() => setPeek(false)}
+    >
+      <div className="r-drawer-head">
         <a
           className="r-brand"
           aria-label="Northing Signal · AI 事件简报"
@@ -2305,87 +2307,192 @@ export default function ReaderApp() {
             navigate("briefing");
           }}
         >
-          <img className="r-brand-mark" src={brandMark} width={32} height={32} alt="" />
-          <span>
-            Northing Signal<small>AI 事件简报</small>
-          </span>
+          <img className="r-brand-mark" src={brandMark} width={28} height={28} alt="" />
+          <span>Northing Signal</span>
         </a>
-        <nav aria-label="主要导航" className="r-nav-primary">
-          {primaryNav.map(([id, icon, label]) => (
-            <button
-              key={id}
-              className={navPage === id ? "selected" : ""}
-              aria-current={navPage === id ? "page" : undefined}
-              onClick={() => navigate(id)}
-            >
-              <Glyph name={icon} size={19} />
-              <span>{label}</span>
-              {id === "following" && unreadFollows > 0 && <b>{unreadFollows}</b>}
-              {id === "saved" && savedCount > 0 && <small>{savedCount}</small>}
-            </button>
-          ))}
-        </nav>
-        <div className="r-nav-secondary">{secondaryNav}</div>
-        <small className="r-nav-foot">本机个人阅读空间 · 无站外通知</small>
-      </aside>
-
-      <div className={"r-main" + (page === "story" ? " is-reading" : "")}>
-        {page === "story" ? (
-          <header className="r-top r-top-reader">
-            <button className="r-back" onClick={closeStory}>
-              <Glyph name="back" size={18} />
-              <span>返回{backLabel[from]}</span>
-            </button>
-            {position.index >= 0 && trail.length > 1 && (
-              <div className="r-stepper">
-                <span>
-                  {position.index + 1} / {trail.length}
-                </span>
-                <button
-                  className="r-icon"
-                  aria-label="上一条"
-                  title="上一条（K）"
-                  disabled={!position.prev}
-                  onClick={() => goStory(position.prev)}
-                >
-                  <Glyph name="back" size={17} />
-                </button>
-                <button
-                  className="r-icon"
-                  aria-label="下一条"
-                  title="下一条（J）"
-                  disabled={!position.next}
-                  onClick={() => goStory(position.next)}
-                >
-                  <Glyph name="arrow" size={17} />
-                </button>
-              </div>
-            )}
-          </header>
-        ) : (
-          <header className="r-top">
-            <div className="r-top-title">
-              <h1>{pageTitle[page]}</h1>
-              <p>{subtitle}</p>
-            </div>
-            <div className="r-top-actions">
-              {page === "following" && follows.length > 0 && (
-                <button className="r-button" onClick={() => beginFollow()}>
-                  <Glyph name="plus" size={16} />
-                  <span className="r-hide-sm">新增追踪</span>
-                </button>
-              )}
-              {page === "briefing" && updateButton}
+        <button
+          className="r-icon r-drawer-toggle"
+          aria-label={menuOpen ? "关闭导航" : "隐藏侧栏（[）"}
+          title={menuOpen ? "关闭导航" : "隐藏侧栏（[）"}
+          onClick={() => (menuOpen ? setMenuOpen(false) : toggleDrawer())}
+        >
+          <Glyph name={menuOpen ? "close" : "sidebar"} size={18} />
+        </button>
+      </div>
+      <button
+        className={"r-drawer-search" + (navPage === "discover" ? " on" : "")}
+        onClick={() => navigate("discover")}
+      >
+        <Glyph name="search" size={16} />
+        <span>搜索</span>
+        <kbd>/</kbd>
+      </button>
+      <nav ref={navRef} className="r-drawer-nav" aria-label="主要导航">
+        {pill && (
+          <i className="r-drawer-pill" aria-hidden="true" style={{ transform: `translateY(${pill.top}px)`, height: pill.height }} />
+        )}
+        <div className="r-drawer-group">
+          {navButton("briefing", "home", "今日简报", newCount > 0 && !historical ? <b className="hot">{newCount}</b> : null)}
+          {navButton("trends", "signal", "动向")}
+          {navButton("following", "follow", "追踪", unreadFollows > 0 ? <b className="hot">{unreadFollows}</b> : null)}
+          {navButton("saved", "bookmark", "收藏", savedCount > 0 ? <b>{savedCount}</b> : null)}
+          {navButton("library", "book", "资料库")}
+        </div>
+        {view && (cardSet.active.length > 0 || pinned.length > 0) && (
+          <div className="r-drawer-group">
+            <div className="r-drawer-label-row">
+              <h2 className="r-drawer-label">公司动向</h2>
               <button
-                className="r-icon r-menu-button"
-                aria-label="更多"
-                onClick={() => setMenuOpen(true)}
+                className="r-drawer-edit"
+                aria-label="编辑侧栏里的公司"
+                title="编辑侧栏里的公司"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setPeek(false);
+                  setEditCompanies(true);
+                }}
               >
-                <Glyph name="menu" size={20} />
+                <Glyph name="edit" size={14} />
               </button>
             </div>
-          </header>
+            {pinned.map((c) => (
+              <button
+                key={c.id}
+                className="r-drawer-item"
+                aria-current={pinnedCompany === c.id ? "page" : undefined}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setPeek(false);
+                  openCompanyRoadmap(c.id);
+                }}
+              >
+                <CompanyLogo id={c.id} name={c.name} size={14} className="xs" />
+                <span>{c.name}</span>
+                <b>{c.total}</b>
+              </button>
+            ))}
+          </div>
         )}
+        {follows.length > 0 && (
+          <div className="r-drawer-group">
+            <h2 className="r-drawer-label">追踪话题</h2>
+            {follows.slice(0, 6).map((f) => (
+              <button
+                key={f.id}
+                className="r-drawer-item"
+                onClick={() => {
+                  setSelectedFollow(f.id);
+                  navigate("following");
+                }}
+              >
+                <i className={"r-follow-dot" + (f.active ? " on" : "")} aria-hidden="true" />
+                <span>{f.name}</span>
+                {f.unread_ids.length > 0 && <b className="hot">{f.unread_ids.length}</b>}
+              </button>
+            ))}
+          </div>
+        )}
+      </nav>
+      <div className="r-drawer-group r-drawer-tools">
+        <h2 className="r-drawer-label">工具</h2>
+        {secondaryNav}
+      </div>
+      <div className="r-theme" role="radiogroup" aria-label="外观">
+        {(
+          [
+            ["light", "sun", "浅色"],
+            ["dark", "moon", "深色"],
+            ["auto", "monitor", "跟随系统"],
+          ] as [ThemeChoice, string, string][]
+        ).map(([id, icon, label]) => (
+          <button
+            key={id}
+            role="radio"
+            aria-checked={theme === id}
+            className={theme === id ? "active" : ""}
+            title={id === "auto" ? "跟随系统的浅色或深色设置" : label}
+            onClick={() => setTheme(id)}
+          >
+            <Glyph name={icon} size={14} />
+            <span>{id === "auto" ? "自动" : label}</span>
+          </button>
+        ))}
+      </div>
+      <p className="r-drawer-foot">
+        <Glyph name="clock" size={14} />
+        <span>
+          {historical ? "正在查看过去的简报" : view?.schedule?.enabled ? `下次自动更新 ${clockLabel(view.schedule.next)}` : "自动更新已关闭"}
+        </span>
+      </p>
+    </aside>
+  );
+
+  return (
+    <div
+      className={
+        "r-app" +
+        (drawerHidden ? " drawer-hidden" : "") +
+        (peek ? " drawer-peek" : "") +
+        (menuOpen ? " drawer-open" : "")
+      }
+    >
+      <div className="r-wall" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </div>
+      {drawerHidden && <div className="r-edge" aria-hidden="true" onMouseEnter={() => setPeek(true)} />}
+      {menuOpen && <div className="r-scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
+      {drawer}
+
+      <section className={"r-window" + (page === "story" ? " is-reading" : "")}>
+        <header className="r-winbar">
+          <button
+            className={"r-icon r-winbar-drawer" + (drawerOpen && !drawerHidden ? "" : " show")}
+            aria-label="显示导航（[）"
+            title="显示导航（[）"
+            onClick={toggleDrawer}
+          >
+            <Glyph name="sidebar" size={18} />
+          </button>
+          {page === "story" ? (
+            <button className="r-back" onClick={closeStory}>
+              <Glyph name="back" size={17} />
+              <span>返回{origin?.label || backLabel[from]}</span>
+            </button>
+          ) : null}
+          <span className="r-winbar-spacer" />
+          {page === "story" && position.index >= 0 && trail.length > 1 && (
+            <div className="r-stepper">
+              <span>
+                {position.index + 1} / {trail.length}
+              </span>
+              <button
+                className="r-icon"
+                aria-label="上一条"
+                title="上一条（K）"
+                disabled={!position.prev}
+                onClick={() => goStory(position.prev)}
+              >
+                <Glyph name="back" size={17} />
+              </button>
+              <button
+                className="r-icon"
+                aria-label="下一条"
+                title="下一条（J）"
+                disabled={!position.next}
+                onClick={() => goStory(position.next)}
+              >
+                <Glyph name="arrow" size={17} />
+              </button>
+            </div>
+          )}
+          {page !== "story" && page !== "discover" && (
+            <button className="r-icon" aria-label="搜索（/）" title="搜索（/）" onClick={() => navigate("discover")}>
+              <Glyph name="search" size={17} />
+            </button>
+          )}
+        </header>
 
         <div className="r-status-area">
           {error && (
@@ -2427,7 +2534,7 @@ export default function ReaderApp() {
                 <span className="r-bar">
                   <i
                     style={{
-                      width: `${Math.round(((run.analyzed + run.failed) / run.total) * 100)}%`,
+                      transform: `scaleX(${(run.analyzed + run.failed) / run.total})`,
                     }}
                   />
                 </span>
@@ -2474,44 +2581,61 @@ export default function ReaderApp() {
             )}
         </div>
 
-        <div className={"r-body" + (railContent ? " has-rail" : "")}>
-          <main className="r-page">
-            {!view ? (
-              <div className="r-loading" aria-busy="true">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="r-skeleton" />
-                ))}
+        <main className="r-page" key={page === "trends" ? `trends-${trend.lens}-${trend.company}` : page}>
+          {page !== "story" && (
+            <header className="r-page-head">
+              <div>
+                <h1>{pageTitle[page]}</h1>
+                <p>{subtitle}</p>
               </div>
-            ) : page === "briefing" ? (
-              briefingPage()
-            ) : page === "trends" ? (
-              trendsPage()
-            ) : page === "discover" ? (
-              discoverPage()
-            ) : page === "following" ? (
-              followingPage()
-            ) : page === "saved" ? (
-              savedPage()
-            ) : page === "story" ? (
-              storyPage()
-            ) : (
-              libraryPage()
-            )}
-            {page !== "story" && (
-              <footer className="r-footer">
-                Northing Signal · 关注变化，保留判断 ·{" "}
-                <button className="r-link" onClick={() => setSourcesOpen(true)}>
-                  来源与缺口
-                </button>
-              </footer>
-            )}
-          </main>
-          {railContent && (
-            <aside className="r-rail" aria-label="概览">
-              {railContent}
-            </aside>
+              <div className="r-page-actions">
+                {page === "following" && follows.length > 0 && (
+                  <button className="r-button" onClick={() => beginFollow()}>
+                    <Glyph name="plus" size={16} />
+                    <span>新增追踪</span>
+                  </button>
+                )}
+                {page === "briefing" && deckList.length > 0 && (
+                  <button className="r-button" onClick={() => setDeck(deckList)} title="逐张浏览未读内容">
+                    <Glyph name="cards" size={16} />
+                    <span>快速翻阅</span>
+                    <small>{deckList.length}</small>
+                  </button>
+                )}
+                {page === "briefing" && updateButton}
+              </div>
+            </header>
           )}
-        </div>
+          {!view ? (
+            <div className="r-loading" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="r-skeleton" />
+              ))}
+            </div>
+          ) : page === "briefing" ? (
+            briefingPage()
+          ) : page === "trends" ? (
+            trendsPage()
+          ) : page === "discover" ? (
+            discoverPage()
+          ) : page === "following" ? (
+            followingPage()
+          ) : page === "saved" ? (
+            savedPage()
+          ) : page === "story" ? (
+            storyPage()
+          ) : (
+            libraryPage()
+          )}
+          {page !== "story" && (
+            <footer className="r-footer">
+              Northing Signal · 关注变化，保留判断 ·{" "}
+              <button className="r-link" onClick={() => setSourcesOpen(true)}>
+                来源与缺口
+              </button>
+            </footer>
+          )}
+        </main>
         {current && !historical && (
           <div className="r-reader-bar">
             <DetailActions
@@ -2522,7 +2646,7 @@ export default function ReaderApp() {
             />
           </div>
         )}
-      </div>
+      </section>
 
       <nav className="r-tabbar" aria-label="主要导航">
         {primaryNav.map(([id, icon, label]) => (
@@ -2541,6 +2665,41 @@ export default function ReaderApp() {
         ))}
       </nav>
 
+      {editCompanies && view && (
+        <DrawerCompanies
+          cards={[...cardSet.active, ...cardSet.quiet]}
+          shown={pinned}
+          custom={!!view.preferences.drawer_companies}
+          save={async (ids) => {
+            try {
+              setView(
+                await request<View>("/preferences", {
+                  method: "PUT",
+                  body: JSON.stringify({ ...view.preferences, drawer_companies: ids }),
+                }),
+              );
+              say(ids ? "侧栏公司已更新。" : "侧栏恢复为动作最多的 4 家公司。");
+            } catch (e) {
+              fail(e);
+              throw e;
+            }
+          }}
+          close={() => setEditCompanies(false)}
+        />
+      )}
+      {deck && (
+        <QuickDeck
+          stories={deck}
+          isSaved={(s) => !!(byId(s.id) || s).saved}
+          toggleSave={(s) => act(byId(s.id) || s, "saved")}
+          open={(s) => {
+            setDeck(null);
+            open(s, deck, "快速翻阅");
+          }}
+          close={() => setDeck(null)}
+        />
+      )}
+
       {notice && (
         <Toast
           message={notice.text}
@@ -2549,11 +2708,6 @@ export default function ReaderApp() {
         />
       )}
 
-      {menuOpen && (
-        <Sheet title="更多" close={() => setMenuOpen(false)}>
-          <div className="r-menu">{secondaryNav}</div>
-        </Sheet>
-      )}
 
       {accountOpen && view?.account && (
         <Sheet title="账号" close={() => setAccountOpen(false)}>

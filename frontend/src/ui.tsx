@@ -30,6 +30,13 @@ const paths: Record<string, string> = {
   download: "M12 3v12 m-5-5 5 5 5-5 M4 17v3h16v-3",
   copy: "M9 9h11v11H9Z M5 15H4V4h11v1",
   doc: "M6 3h8l4 4v14H6Z M14 3v4h4 M9 12h6 M9 16h6",
+  sidebar: "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M9 4v16",
+  cards: "M8 4h11a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z M4 7v12a1 1 0 0 0 1 1h10",
+  pulse: "M3 12h4l3-7 4 14 3-7h4",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4 21a8 8 0 0 1 16 0",
+  sun: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4",
+  moon: "M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z",
+  monitor: "M3 5h18v11H3Z M8 20h8 M12 16v4",
 };
 
 export function Glyph({ name, size = 20 }: { name: string; size?: number }) {

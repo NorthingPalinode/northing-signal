@@ -14,6 +14,7 @@ from .discover import discover
 from .engine import active_actions, frame_key, occurrences, project, stamp, text_key
 from .events import assign, frame_of, resolve
 from .github import KINDS as RANKINGS
+from .github import LINE_BATCH, LINE_PROMPT, line_payload, line_validator, missing_lines, with_lines
 from .intent import IntentEngine, recall_candidates
 from .lenses import Lenses
 from .models import (
@@ -42,6 +43,7 @@ from .triage import triage
 from .understand import POLICY_HASH, Analyzer, has_material
 
 PROJECTION_MAX_AGE = 600
+BRIEFED_DAYS = 7  # earlier briefings that count for carried stories (engine.RETURN_SOURCES)
 PROJECTION_CACHE = 64  # readers whose projection is kept in memory
 # Past briefings are saved for readers seen within this window when an update completes.
 SNAPSHOT_ACTIVE_DAYS, SNAPSHOT_READERS = 30, 200
@@ -107,7 +109,7 @@ class ContentService:
         latest = self.store.last_refresh(completed=True)
         bounds = dict(briefing_at=latest["finished_at"], new_since=latest["started_at"]) if latest else {}
         bounds.update(refreshed=self.store.refresh_times(), late_hours=self.late_hours,
-                      thresholds=self.thresholds())
+                      thresholds=self.thresholds(), briefed=self.briefed(latest, membership, user))
         value = project(materials, judgments, preferences, interactions, membership=membership, **bounds)
         saved_versions = {a["version"] for a in active_actions(interactions) if a["kind"] == "saved"}
         saved_view = project(self.store.materials_by_versions(saved_versions), judgments, preferences,
@@ -260,6 +262,21 @@ class ContentService:
             return members  # nothing merged: stored ids are current (read-only use)
         return {material: resolve(event, aliases) for material, event in members.items()}
 
+    def briefed(self, latest, membership, user=LOCAL_USER):
+        """Events that briefings before the latest update put in focus or radar, within BRIEFED_DAYS.
+
+        Snapshots are written during an update, before it records its end, which moves the reader
+        revision: the projection cache sees new ones without triggers of their own."""
+        if not latest or not latest.get("started_at"):
+            return frozenset()
+        start = stamp(latest["started_at"])
+        if not start:
+            return frozenset()
+        versions = self.store.briefed_versions(
+            (start - timedelta(days=BRIEFED_DAYS)).isoformat(), latest["started_at"], user)
+        version_ids = self.store.version_ids()
+        return frozenset(e for v in versions if (e := membership.get(version_ids.get(v))))
+
     def attribute(self, interactions, membership):
         """Credit each action to the event its version's material belongs to now (splits, merges)."""
         version_ids = self.store.version_ids()
@@ -403,6 +420,34 @@ class ContentService:
                 checked += 1
             self.store.record_relations(rows)
         run["relations"] = {"checked": checked, "merged": merged}
+
+    async def describe_rankings(self, run, limit=60):
+        """One Chinese line for each ranked project that has none yet (github.py). A model failure
+        stops this step only; the lists keep their English descriptions."""
+        if not limit or not self.analyzer.configured:
+            return
+        ids = [s["id"] for s in self.sources if s["kind"] in RANKINGS]
+        states = self.store.source_states()
+        rows = missing_lines(states[i] for i in ids if i in states)[:limit]
+        lines = {}
+        for start in range(0, len(rows), LINE_BATCH):
+            batch = rows[start:start + LINE_BATCH]
+            try:
+                answers = await self.analyzer.request_json(
+                    LINE_PROMPT, line_payload(batch), line_validator([r["name"] for r in batch]),
+                    purpose="repo_line", maximum=1800)
+            except ValueError as error:
+                run["errors"].append("repo_line_" + str(error).removeprefix("intent_"))
+                break
+            lines.update({(r["name"], r["description"]): answers[r["name"]] for r in batch if r["name"] in answers})
+        if not lines:
+            return
+        states = self.store.source_states()  # re-read: only the rows change
+        for source_id in ids:
+            state = states.get(source_id)
+            if state and state.get("ranking"):
+                self.store.source_state(source_id, {**state, "ranking": with_lines(state["ranking"], lines)})
+        run["repo_lines"] = len(lines)
 
     def merge_by_model(self, target, source, answer):
         """Fold the newer event into the older one, unless a reader split either of them."""
@@ -751,6 +796,7 @@ class ContentService:
             await self.analyze(candidates, run, request.analyze_limit)
             run["stage"] = "grouping"
             await self.relate_events(run)
+            await self.describe_rankings(run)
             run["stage"] = "publishing"
             # Shared content, personal briefings: save one for each recently active reader.
             since = (datetime.now(timezone.utc) - timedelta(days=SNAPSHOT_ACTIVE_DAYS)).isoformat()

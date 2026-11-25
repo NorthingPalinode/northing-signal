@@ -170,8 +170,10 @@ async def read_source(source, limit):
 async def collect(store, sources, limit=10, progress=None, github_token=""):
     """github_token: optional, raises the GitHub search API's anonymous rate limit."""
     from .github import KINDS as RANKINGS
-    from .github import read_ranking
+    from .github import known_lines, read_ranking, with_lines
     semaphore = asyncio.Semaphore(4)
+    # Chinese lines written in earlier updates, reused while a project's description is unchanged.
+    lines = known_lines(store.source_states().values())
 
     async def one(source):
         async with semaphore:
@@ -179,7 +181,7 @@ async def collect(store, sources, limit=10, progress=None, github_token=""):
             try:
                 if source.get("kind") in RANKINGS:
                     # A ranking, not materials: kept in the source's state, never judged.
-                    ranked = await asyncio.wait_for(read_ranking(source, fetch, github_token), 35)
+                    ranked = with_lines(await asyncio.wait_for(read_ranking(source, fetch, github_token), 35), lines)
                     value = {"status": "ok" if ranked else "empty", "at": now(), "last_success": now(),
                              "count": len(ranked), "added": 0, "with_text": 0, "error": None,
                              "ranking": ranked, "ranking_at": now()}

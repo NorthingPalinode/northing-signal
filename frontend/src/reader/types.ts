@@ -17,6 +17,8 @@ export type Prefs = {
   auto_refresh: boolean;
   /** IANA timezone for shown dates; empty follows the site timezone. */
   timezone?: string;
+  /** Companies in the sidebar, in order; null or absent: the four most active. */
+  drawer_companies?: string[] | null;
 };
 export type Claim = { statement: string; quote: string; kind: string };
 export type Action = { request_id: string; kind: string; at: string; version: string };
@@ -75,6 +77,8 @@ export type Story = {
   new?: boolean;
   /** An older event that got a new report in the latest update. */
   updated?: boolean;
+  /** In an earlier briefing's focus or radar, seen there and not opened, with no news since. */
+  carried?: boolean;
   /** Found while it was news. Late finds and undated reports are archived, not "today". */
   timely?: boolean;
   stale_reason?: "late" | "undated" | null;
@@ -240,6 +244,8 @@ export type RepoRow = {
   name: string;
   url: string;
   description: string;
+  /** One Chinese sentence the model wrote from the description; absent without a model. */
+  summary_zh?: string;
   language: string;
   stars: number;
   forks: number;

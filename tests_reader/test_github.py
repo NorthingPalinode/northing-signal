@@ -92,3 +92,52 @@ def test_the_view_carries_rankings_and_source_status_omits_their_rows(tmp_path):
     assert {r["id"] for r in view["rankings"]} >= {"github-trending-weekly", "github-new", "github-top"}
     listed = next(s for s in view["sources"] if s["id"] == "github-trending-daily")
     assert "ranking" not in listed["state"]
+
+
+def test_ranked_projects_get_one_chinese_line_once_and_keep_it_while_unchanged(tmp_path, monkeypatch):
+    from northing_signal.briefing.service import ContentService
+    from test_reader import settings
+    store = Store(tmp_path / "reader.db")
+    source = {"id": "github-trending-daily", "name": "Trending", "kind": "github_trending",
+              "url": "https://github.com/trending", "hosts": ["github.com"], "max_items": 5}
+
+    async def ok(url, hosts, **_):
+        return TRENDING
+
+    monkeypatch.setattr("northing_signal.briefing.collect.fetch", ok)
+    asyncio.run(collect(store, [source]))
+    service = ContentService(store, settings(llm_mode="compatible"))
+    service.sources = [source]
+    calls = []
+
+    async def fake(prompt, payload, validator, *, purpose, maximum):
+        calls.append(payload)
+        lines = {"acme/agent-kit": "面向编程智能体的 Agent 框架", "lists/awesome-llm": "not chinese"}
+        return validator({"items": [{"id": row["id"], "summary": lines[row["id"]]} for row in payload]})
+
+    service.analyzer.request_json = fake
+    run = service.new_run("refresh", "grouping")
+    asyncio.run(service.describe_rankings(run))
+    rows = {r["name"]: r for r in store.source_states()["github-trending-daily"]["ranking"]}
+    assert rows["acme/agent-kit"]["summary_zh"] == "面向编程智能体的 Agent 框架"
+    assert "summary_zh" not in rows["lists/awesome-llm"]  # a non-Chinese answer is dropped
+    assert run["repo_lines"] == 1 and len(calls) == 1 and calls[0][0]["description"]
+
+    # The next fetch keeps the line (same description), so only the undescribed one is asked again.
+    asyncio.run(collect(store, [source]))
+    rows = {r["name"]: r for r in store.source_states()["github-trending-daily"]["ranking"]}
+    assert rows["acme/agent-kit"]["summary_zh"] == "面向编程智能体的 Agent 框架"
+    asyncio.run(service.describe_rankings(service.new_run("refresh", "grouping")))
+    assert [row["id"] for row in calls[1]] == ["lists/awesome-llm"]
+
+
+def test_without_a_model_rankings_keep_their_own_descriptions(tmp_path):
+    from northing_signal.briefing.service import ContentService
+    from test_reader import settings
+    store = Store(tmp_path / "reader.db")
+    store.source_state("github-trending-daily", {"status": "ok", "ranking": [
+        {"name": "acme/agent-kit", "description": "An agent framework"}]})
+    run = ContentService(store, settings()).new_run("refresh", "grouping")
+    asyncio.run(ContentService(store, settings()).describe_rankings(run))
+    assert "summary_zh" not in store.source_states()["github-trending-daily"]["ranking"][0]
+    assert "repo_lines" not in run and not run["errors"]
